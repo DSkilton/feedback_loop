@@ -27,3 +27,21 @@ class Assignment(Base):
     title = Column(String)
     description = Column(String)
     due_date = Column(DateTime)
+
+class FeedbackThred(Base):
+    __tablename__ = "feedback_threads"
+
+    id = Column(Integer, primary_key=True)
+    assignment_id = Column(Integer, ForeignKey("assignments.id"))
+    student_id = Column(Integer, ForeignKey("users.id"))
+    teacher_id = Column(Integer, ForeignKey("users.id"))
+    status = Column(String, default="open")
+
+class Comment(Base):
+    __tablename__ = "comments"
+
+    id = Column(Integer, primary_key=True)
+    thread_id = Column(Integer, ForeignKey("feedback_threads.id"))
+    author_id = Column(Integer, ForeignKey("users.id"))
+    body = Column(String)
+    created_at = Column(DateTime)

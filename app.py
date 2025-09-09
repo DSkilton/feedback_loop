@@ -33,7 +33,7 @@ def login(m_number, password):
 def feedback_new(assignment_id, student_id, teacher_id, status, body):
     db = SessionLocal()
     try:
-        feedback = FeedbackThread(assignment_id=assignment_id, student_id=student_id, teacher_id=teacher_id, body=body)
+        feedback = FeedbackThread(assignment_id=assignment_id, student_id=student_id, teacher_id=teacher_id, status=status, body=body)
         db.add(feedback)
         db.flush()
 
@@ -60,11 +60,11 @@ def main():
     init_db()
     print("Database initialized.")
 
-    # register_user("M123456", "Alice", "staff", "password123")
+    register_user("M123456", "Alice", "staff", "password123")
     login("M123456", "password123")
 
     # create_assignment("101", "Assignment 1", "For this assignment you must do X, Y and Z", dt.datetime(2025, 12, 31, tzinfo=dt.timezone.utc))
-    feedback_new(1, 1, 1, "OPEN", "Message 1: From teacher to student")
+    # feedback_new(1, 1, 1, "OPEN", "Message 1: From teacher to student")
     # feedback_new(1, 1, 1, "OPEN", "Message 2: From student to teacher")
 
 if __name__ == "__main__":

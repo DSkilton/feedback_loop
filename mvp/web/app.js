@@ -11,7 +11,7 @@ const columns = [
   { key: "READY_FOR_REVIEW", name: "Ready for review", hint: "Tutor to check", tone: "violet" },
   { key: "CLOSED", name: "Completed", hint: "Closed by tutor", tone: "green" },
 ];
-const state = { identity: "tutor-1", bootstrap: null, threads: [], page: "board", learnerFilter: "all", selected: null };
+const state = { identity: "tutor-1", mode: "disabled", bootstrap: null, threads: [], page: "board", learnerFilter: "all", selected: null };
 const $ = (id) => document.getElementById(id);
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -32,9 +32,17 @@ function notify(text) {
   notify.timer = setTimeout(() => toast.classList.remove("show"), 3500);
 }
 async function api(path, options = {}) {
+  const isForm = options.body instanceof FormData;
   const response = await fetch(path, {
+    credentials: "same-origin",
     ...options,
-    headers: { "X-Demo-User": state.identity, ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers || {}) },
+    headers: {
+      ...(state.mode === "demo" ? { "X-Demo-User": state.identity } : {}),
+      ...(options.body && !isForm ? { "Content-Type": "application/json" } : {}),
+      ...(state.mode === "entra" && options.method && options.method !== "GET" ?
+          { "X-CSRF-Token": state.bootstrap?.csrf_token || "" } : {}),
+      ...(options.headers || {}),
+    },
   });
   if (!response.ok) {
     const problem = await response.json().catch(() => ({}));
@@ -48,9 +56,13 @@ async function refresh() {
     state.threads = state.bootstrap.user.role === "admin" ? [] : await api("/api/threads");
     state.page = state.bootstrap.user.role === "admin" ? "reports" : "board";
     updateNavigation();
+    $("entraLogout").hidden = state.mode !== "entra";
     await render();
   } catch (err) {
-    $("app").innerHTML = '<div class="error-panel"><h2>Unable to load the demonstration</h2><p>' + escapeHtml(err.message) + '</p><p>Start the app with <code>FEEDBACK_LOOP_DEMO_MODE=1</code>. This demonstration must run only on localhost.</p></div>';
+    const text = state.mode === "entra"
+      ? '<p>Use your approved College account to sign in. Enrolment and Microsoft app roles are configured by College IT.</p><a class="button-primary" href="/auth/login">Sign in with Microsoft</a>'
+      : '<p>Start the app with <code>FEEDBACK_LOOP_DEMO_MODE=1</code>. This demonstration must run only on localhost.</p>';
+    $("app").innerHTML = '<div class="error-panel"><h2>Unable to access the workspace</h2><p>' + escapeHtml(err.message) + '</p>' + text + '</div>';
   }
 }
 function updateNavigation() {
@@ -94,6 +106,7 @@ function renderBoard() {
     (isTeacher ? '<button class="button-primary" id="createButton" type="button">＋ Share feedback</button>' : '<span class="pale-pill">Your private workspace</span>') + '</section>' +
     '<div class="intro-strip"><span class="intro-symbol">✦</span><p><strong>Feedback is a conversation.</strong> Read your tutor’s comments, take the next step, and submit your work for review. Only a tutor can close the loop.</p></div>' +
     '<section class="metrics" aria-label="Board overview"><div class="metric"><span>Actions on board</span><strong>' + required.length + '</strong></div><div class="metric"><span>In progress</span><strong>' + working + '</strong></div><div class="metric"><span>Awaiting tutor</span><strong>' + review + '</strong></div><div class="metric"><span>Completed</span><strong>' + done + '</strong></div></section>' +
+    (isTeacher ? '<section class="focus-section" id="focusSection" aria-label="Repeated development needs"><h2>Recurring development needs</h2><p>Checking teacher-assigned focus tags across assignments…</p></section>' : '') +
     '<div class="board-controls"><div><h2>Feedback journey</h2><p>Move your work forward. Keep the discussion open.</p></div>' + roster + '</div>' +
     '<section class="kanban" aria-label="Feedback progress board">' + columns.map((column) => {
       const cards = list.filter((t) => t.status === column.key);
@@ -106,7 +119,7 @@ function renderBoard() {
     '<footer class="page-footer">Prototype for co-design. Initial assessment feedback is also recorded in Microsoft Teams.</footer>';
   if (isTeacher) $("createButton").addEventListener("click", openCreate);
   const select = $("learnerFilter");
-  if (select) select.addEventListener("change", (event) => { state.learnerFilter = event.target.value; renderBoard(); });
+  if (select) select.addEventListener("change", async (event) => { state.learnerFilter = event.target.value; await render(); });
 }
 async function renderReports() {
   const report = await api("/api/reports");
@@ -127,9 +140,26 @@ async function renderReports() {
     '<section class="report-panel report-notes"><div class="panel-heading"><div><h2>Interpretation and next steps</h2><p>Quality reporting should prompt discussion, not replace professional judgement.</p></div></div><div class="principle-grid"><div><strong>01 · Review patterns</strong><p>Discuss repeated areas with tutors and consider appropriate teaching support.</p></div><div><strong>02 · Preserve context</strong><p>Numbers alone cannot explain a learner’s personal circumstances or development.</p></div><div><strong>03 · Protect privacy</strong><p>Do not include pastoral information in ordinary quality reports.</p></div></div></section>' +
     '<footer class="page-footer">' + escapeHtml(report.note) + '</footer>';
 }
+async function renderTutorFocus() {
+  const target = $("focusSection");
+  if (!target || state.bootstrap.user.role !== "tutor") return;
+  const data = await api("/api/tutor/focus-areas");
+  const filtered = data.recurring.filter((item) => state.learnerFilter === "all" || item.learner_id === state.learnerFilter);
+  target.innerHTML = '<div class="focus-heading"><div><h2>Recurring development needs</h2><p>Focus areas manually tagged by teachers across two or more assignments</p></div><span class="tag tag-neutral">' + filtered.length + ' observations</span></div>' +
+    (filtered.length
+      ? '<div class="focus-grid">' + filtered.map((f) =>
+        '<article class="focus-card"><span class="step-label">' + escapeHtml(f.learner) + '</span><strong>' + escapeHtml(f.focus) + '</strong>' +
+        '<p>Appears in ' + f.assignment_count + ' assignments (' + f.feedback_count + ' feedback entries)</p>' +
+        '<div>' + f.threads.map((t) => '<button class="text-button focus-link" type="button" data-open="' + t.feedback_id + '">' + escapeHtml(t.assignment) + ' →</button>').join("") + '</div></article>'
+      ).join("") + '</div>'
+      : '<p class="focus-empty">No recurring focus areas have been marked yet. Repeated tutor tags will appear here, not AI-generated learner judgements.</p>');
+}
 async function render() {
   if (state.page === "reports") await renderReports();
-  else renderBoard();
+  else {
+    renderBoard();
+    if (state.bootstrap.user.role === "tutor") await renderTutorFocus();
+  }
 }
 function openCreate() {
   $("assignmentSelect").innerHTML = state.bootstrap.assignments.map((a) =>
@@ -139,6 +169,16 @@ function openCreate() {
   $("createError").textContent = "";
   $("newForm").reset();
   $("newDialog").showModal();
+}
+function teamsReference(value) {
+  try {
+    const parsed = new URL(value);
+    const host = parsed.hostname.toLowerCase();
+    if (parsed.protocol === "https:" && (host === "teams.microsoft.com" || host === "teams.cloud.microsoft" || host === "microsoft365.com")) {
+      return '<a href="' + escapeHtml(parsed.href) + '" target="_blank" rel="noopener noreferrer">Open in Teams ↗</a>';
+    }
+  } catch (_) { /* A teacher may provide a non-URL assignment reference. */ }
+  return '<span>' + escapeHtml(value) + '</span>';
 }
 function actionButtons(thread) {
   const isLearner = state.bootstrap.user.role === "learner";
@@ -165,7 +205,18 @@ async function openThread(fid) {
     (t.criterion ? '<div class="criterion">' + escapeHtml(t.criterion) + '</div>' : '') +
     '<p>' + escapeHtml(t.feedback_text) + '</p></div>' +
     (t.feedback_required ? '<div class="detail-next"><span class="step-label">YOUR NEXT STEP</span><p>' + escapeHtml(t.next_step) + '</p></div>' : '<div class="detail-next info"><strong>No action required.</strong> This feedback is shared for information.</div>') +
-    '<div class="teams-reference"><strong>Initial feedback in Teams</strong><span>' + escapeHtml(t.teams_reference) + '</span><small>Reference entered manually by the tutor. Sync is not enabled.</small></div></div>' +
+    '<div class="teams-reference"><strong>Initial feedback in Teams</strong>' + teamsReference(t.teams_reference) +
+    '<small>' + (t.teams_handoff?.confirmed_at ? 'Teacher confirmed recording in Teams · ' + niceDate(t.teams_handoff.confirmed_at) : 'Legacy reference; no confirmed handoff') + '. This is not automatic sync.</small></div></div>' +
+    '<section class="evidence-section"><h3>Evidence of improvement</h3>' +
+    (t.evidence.length
+      ? '<ul class="evidence-list">' + t.evidence.map((e) => '<li><div><strong>' + escapeHtml(e.filename) +
+          '</strong><small>' + escapeHtml(e.uploaded_by) + ' · ' + niceDate(e.created_at) + (e.caption ? ' · ' + escapeHtml(e.caption) : '') +
+          '</small></div><button class="button-ghost" type="button" data-evidence="' + t.id + ':' + e.id + '" data-filename="' +
+          escapeHtml(e.filename) + '">Download</button></li>').join("") + '</ul>'
+      : '<p class="quiet">No evidence attached yet.</p>') +
+    (state.bootstrap.user.role === "learner" && (t.status === "IN_PROGRESS" || t.status === "READY_FOR_REVIEW")
+      ? '<form id="evidenceForm" class="evidence-form"><label>Attach evidence <small>PDF, PNG, JPEG or TXT · up to 2 MiB each · maximum 5 files</small><input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.txt" required></label><label>Short description (optional)<input type="text" maxlength="250" name="caption" placeholder="What does this file show?"></label><button class="button-ghost" type="submit">Attach evidence</button></form>'
+      : '') + '</section>' +
     (state.bootstrap.user.role === "learner" && t.status === "IN_PROGRESS" ?
       '<label class="progress-prompt" for="progressEvidence">What have you changed?<textarea id="progressEvidence" rows="3" maxlength="2000" placeholder="Describe the changes you made and how they address the feedback."></textarea><small>This explanation is saved to your conversation when you submit for review.</small></label>' : '') +
     '<div class="detail-actions">' + actionButtons(t) + '</div>' +
@@ -175,6 +226,15 @@ async function openThread(fid) {
     ).join("") : '<p class="quiet">No updates recorded yet.</p>') +
     '</div><form id="commentForm" class="comment-form"><label for="commentText">Add to the conversation</label><textarea name="commentText" id="commentText" rows="3" maxlength="2000" required placeholder="Explain progress, ask for support, or offer guidance."></textarea><button class="button-primary" type="submit">Post comment</button></form>';
   if (!$("threadDialog").open) $("threadDialog").showModal();
+  if ($("evidenceForm")) $("evidenceForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const form = new FormData(event.currentTarget);
+      await api("/api/threads/" + fid + "/evidence", { method: "POST", body: form });
+      await openThread(fid);
+      notify("Evidence attached");
+    } catch (error) { notify(error.message); }
+  });
   $("commentForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
@@ -189,10 +249,28 @@ async function changeStatus(fid, status) {
     const progress_note = $("progressEvidence")?.value || "";
     await api("/api/threads/" + fid + "/status", { method: "POST", body: JSON.stringify({ status, progress_note }) });
     $("threadDialog").close();
-    await refresh();
+    await async function initialise() {
+  try {
+    const res = await fetch("/api/auth-mode");
+    state.mode = (await res.json()).mode;
+  } catch (_) { state.mode = "disabled"; }
+  const isDemo = state.mode === "demo";
+  $("demoBadge").hidden = !isDemo;
+  $("identityLabel").hidden = !isDemo;
+  $("identitySelect").hidden = !isDemo;
+  $("entraLogin").hidden = state.mode !== "entra";
+  await refresh();
+}
+initialise();
     notify("Progress updated");
   } catch (error) { notify(error.message); }
 }
+$("entraLogout").addEventListener("click", async () => {
+  try {
+    await api("/auth/logout", { method: "POST" });
+    window.location.assign("/");
+  } catch (error) { notify(error.message); }
+});
 $("identitySelect").addEventListener("change", async (event) => {
   state.identity = event.target.value;
   state.learnerFilter = "all";
@@ -205,6 +283,24 @@ document.addEventListener("click", async (event) => {
   if (close) { $(close.dataset.close).close(); return; }
   const open = event.target.closest("[data-open]");
   if (open) { try { await openThread(open.dataset.open); } catch (e) { notify(e.message); } return; }
+  const evidence = event.target.closest("[data-evidence]");
+  if (evidence) {
+    const [fid, eid] = evidence.dataset.evidence.split(":");
+    try {
+      const res = await fetch("/api/threads/" + fid + "/evidence/" + eid, {
+        credentials: "same-origin",
+        headers: state.mode === "demo" ? { "X-Demo-User": state.identity } : {},
+      });
+      if (!res.ok) throw new Error("Evidence download was not permitted.");
+      const blob = await res.blob();
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = evidence.dataset.filename;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (error) { notify(error.message); }
+    return;
+  }
   const status = event.target.closest("[data-status]");
   if (status) { await changeStatus(status.dataset.id, status.dataset.status); return; }
 });
@@ -214,6 +310,7 @@ $("newForm").addEventListener("submit", async (event) => {
   const form = new FormData(event.currentTarget);
   const data = Object.fromEntries(form.entries());
   data.feedback_required = $("newForm").elements.feedback_required.checked;
+  data.teams_recorded_confirmed = $("newForm").elements.teams_recorded_confirmed.checked;
   try {
     await api("/api/threads", { method: "POST", body: JSON.stringify(data) });
     $("newDialog").close();

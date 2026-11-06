@@ -11,6 +11,7 @@ A **teacher-led** platform for closing the feedback loop. The learner and tutor 
 - Follow-up comments and next-step progress take place in Feedback Loop.
 - A tutor ticks **Feedback requires student action** to create a learner action. If unticked, it is shared for information only.
 - Learners can advance or revise their work but cannot close the loop. A tutor must review and explicitly close it.
+- When a learner requests tutor review they must explain what they changed; the explanation is stored in the progress timeline.
 - Individual student boards are private. Admin users have only aggregate reporting in the MVP.
 - Pastoral notes are intentionally **not included** in the prototype. They require a separate restricted permission model, retention rules and safeguarding review before being developed.
 

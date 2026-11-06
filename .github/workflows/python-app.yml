@@ -1,21 +1,28 @@
-name: PythonTests
-  
-on: [push]
+name: Python and MVP checks
+
+on:
+  push:
+  pull_request:
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v5
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-    - name: Install dependencies
-      run: |
-        pip install -r requirements.txt
-    - name: Test with pytest-cov
-      run: |
-        pip install pytest pytest-cov
-        pytest test.py --cov --cov-report=xml --cov-report=html
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            mvp/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install -r mvp/requirements.txt
+          python -m pip check
+      - name: Run regression tests
+        run: pytest -q --cov=mvp --cov-report=term-missing
+      - name: Check front-end JavaScript syntax
+        run: node --check mvp/web/app.js

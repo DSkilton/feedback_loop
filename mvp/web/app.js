@@ -128,7 +128,11 @@ function renderBoard() {
     (list.some((t) => t.status === "INFORMATION") ?
       '<section class="information-section"><h2>Shared for information</h2><p>Feedback with no action currently required.</p><div class="information-list">' + list.filter((t) => t.status === "INFORMATION").map(card).join("") + '</div></section>' : '') +
     '<footer class="page-footer">Prototype for co-design. Initial assessment feedback is also recorded in Microsoft Teams.</footer>';
-  if (isTeacher) $("createButton").addEventListener("click", openCreate);
+  if (isTeacher) {
+    $("createButton").addEventListener("click", openCreate);
+    populateTargetLearners();
+    $("targetCohortSelect")?.addEventListener("change", populateTargetLearners);
+  }
   const select = $("learnerFilter");
   if (select) select.addEventListener("change", async (event) => { state.learnerFilter = event.target.value; await render(); });
   const cohort = $("cohortFilter");
@@ -138,6 +142,86 @@ function renderBoard() {
     await render();
   });
 }
+
+function renderCohortOverview() {
+  const cohorts = state.bootstrap.cohorts.filter((cohort) =>
+    state.cohortFilter === "all" || state.cohortFilter === cohort.id);
+  return '<section class="cohort-overview" aria-label="Teaching cohorts"><div class="section-heading"><div><h2>Teaching cohorts</h2><p>Your authorised groups and enrolments</p></div><span class="tag tag-neutral">College roster integration pending</span></div>' +
+    '<div class="cohort-grid">' + cohorts.map((cohort) => {
+      const people = state.bootstrap.learners.filter((u) => u.cohort_id === cohort.id);
+      return '<div class="cohort-panel"><div class="cohort-top"><strong>' + escapeHtml(cohort.name) + '</strong><span>' +
+        escapeHtml(cohort.academic_year) + '</span></div><p>' + escapeHtml(cohort.course) + ' · ' + people.length +
+        ' learner' + (people.length === 1 ? '' : 's') + '</p><div class="cohort-names">' +
+        people.map((u) => '<span>' + escapeHtml(u.name) + '</span>').join('') + '</div></div>';
+    }).join('') + '</div></section>';
+}
+function renderTargetsSection() {
+  const isTutor = state.bootstrap.user.role === "tutor";
+  const targets = state.targets.filter((target) =>
+    (state.learnerFilter === "all" || target.learner_id === state.learnerFilter) &&
+    (state.cohortFilter === "all" || target.cohort_id === state.cohortFilter));
+  const cards = targets.map((target) => {
+    const links = target.linked_feedback.map((item) =>
+      '<button type="button" class="target-link text-button" data-open="' + item.feedback_id + '">' +
+      escapeHtml(item.assignment) + ' · ' + escapeHtml(labelFor(item.status)) + '</button>').join('');
+    const possible = state.threads.filter((thread) =>
+      thread.learner_id === target.learner_id && thread.cohort_id === target.cohort_id &&
+      !target.linked_feedback.some((linked) => linked.feedback_id === thread.id));
+    const review = target.history.at(-1);
+    return '<article class="target-card"><div class="target-card-top"><span class="tag ' +
+      (target.status === "ACHIEVED" ? "tag-achieved" : "tag-action") + '">' +
+      (target.status === "ACHIEVED" ? "Tutor confirmed" : "In development") + '</span><span class="target-date">Since ' +
+      niceDate(target.created_at) + '</span></div><h3>' + escapeHtml(target.title) + '</h3>' +
+      (isTutor ? '<p class="target-learner">' + escapeHtml(target.learner) + '</p>' : '') +
+      '<p>' + escapeHtml(target.guidance) + '</p><div class="target-history"><strong>Linked assignment feedback</strong>' +
+      (links || '<span class="quiet">No feedback linked yet</span>') + '</div>' +
+      (review ? '<div class="target-review-note"><strong>Latest tutor review</strong><p>' +
+        escapeHtml(review.reason) + '</p><small>' + niceDate(review.at) + '</small></div>' : '') +
+      (isTutor ? '<div class="target-actions">' +
+        (target.status === "OPEN" && possible.length
+          ? '<div class="target-attach"><label>Link feedback <select data-link-select="' + target.id +
+            '">' + possible.map((thread) => '<option value="' + thread.id + '">' +
+              escapeHtml(thread.assignment) + '</option>').join('') +
+            '</select></label><button class="button-ghost" type="button" data-target-link="' + target.id +
+            '">Link</button></div>' : '') +
+        '<label>Teacher review decision<textarea rows="2" maxlength="1000" data-target-reason="' + target.id +
+        '" placeholder="Explain the evidence behind your decision (at least 15 characters)"></textarea></label>' +
+        (target.status === "OPEN"
+          ? '<button class="button-primary" type="button" data-target-status="ACHIEVED" data-target-id="' + target.id +
+            '"' + (target.can_achieve ? '' : ' disabled title="Close at least one linked action first"') +
+            '>Mark target achieved</button>'
+          : '<button class="button-ghost" type="button" data-target-status="OPEN" data-target-id="' + target.id +
+            '">Reopen target</button>') +
+        (!target.can_achieve && target.status === "OPEN"
+          ? '<small>Requires at least one linked feedback item closed by a tutor.</small>' : '') +
+        '</div>' : '') + '</article>';
+  }).join('');
+  const cohortOptions = isTutor
+    ? state.bootstrap.cohorts.filter((c) => state.cohortFilter === "all" || c.id === state.cohortFilter)
+      .map((c) => '<option value="' + escapeHtml(c.id) + '">' + escapeHtml(c.name) + '</option>').join('')
+    : '';
+  return '<section class="target-section" id="targets" aria-label="Long-term learning targets">' +
+    '<div class="section-heading"><div><h2>Long-term improvement targets</h2><p>Skills that carry forward across assignments until a tutor confirms achievement</p></div>' +
+    '<span class="tag tag-neutral">' + targets.length + ' target' + (targets.length === 1 ? '' : 's') + '</span></div>' +
+    (cards ? '<div class="target-grid">' + cards + '</div>'
+      : '<p class="focus-empty">No long-term targets are recorded for this view yet.</p>') +
+    (isTutor && cohortOptions ? '<details class="target-create"><summary>＋ Create a learner target</summary>' +
+      '<form id="targetForm" class="target-form">' +
+        '<label>Teaching cohort<select name="cohort_id" id="targetCohortSelect" required>' + cohortOptions + '</select></label>' +
+        '<label>Learner<select name="learner_id" id="targetLearnerSelect" required></select></label>' +
+        '<label>Improvement target<input name="title" required minlength="4" maxlength="140" placeholder="e.g. Test edge cases independently"></label>' +
+        '<label>Tutor guidance<textarea name="guidance" required rows="2" maxlength="1000" placeholder="What improvement should be demonstrated across assignments?"></textarea></label>' +
+        '<button class="button-primary" type="submit">Create target</button></form></details>'
+      : '') +
+    '</section>';
+}
+function populateTargetLearners() {
+  const cohortId = $("targetCohortSelect")?.value;
+  const picker = $("targetLearnerSelect");
+  if (picker) picker.innerHTML = state.bootstrap.learners.filter((p) => p.cohort_id === cohortId)
+    .map((p) => '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(p.name) + '</option>').join('');
+}
+
 async function renderReports() {
   const report = await api("/api/reports");
   const max = Math.max(1, ...report.by_status.map((s) => s.count));

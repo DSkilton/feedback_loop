@@ -104,6 +104,7 @@ class NewFeedback(BaseModel):
 
 class StatusChange(BaseModel):
     status: Literal["ACTION_REQUIRED", "IN_PROGRESS", "READY_FOR_REVIEW", "CLOSED"]
+    progress_note: str = Field(default="", max_length=2000)
 
 
 class NewComment(BaseModel):
@@ -266,6 +267,8 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
                        (READY_FOR_REVIEW, IN_PROGRESS), (IN_PROGRESS, ACTION_REQUIRED)}
             if not thread.feedback_required or (current, target) not in allowed:
                 raise HTTPException(403, "Learners can progress work but cannot close it.")
+            if target == READY_FOR_REVIEW and not payload.progress_note.strip():
+                raise HTTPException(422, "Explain what you changed before requesting review.")
         elif person.role == "tutor":
             allowed = {(READY_FOR_REVIEW, CLOSED), (INFORMATION, CLOSED),
                        (READY_FOR_REVIEW, IN_PROGRESS), (CLOSED, ACTION_REQUIRED),
@@ -277,6 +280,9 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         thread.status = target
         thread.updated_at = utcnow()
         thread.closed_at = utcnow() if target == CLOSED else None
+        if person.role == "learner" and target == READY_FOR_REVIEW:
+            db.add(Note(feedback_id=fid, author_id=person.id,
+                        body="Work submitted for review: " + payload.progress_note.strip()))
         db.add(Event(feedback_id=fid, actor_id=person.id, description=f"Moved from {current} to {target}"))
         db.commit()
         return summarise(db, thread)

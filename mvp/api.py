@@ -865,14 +865,15 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         grouped = defaultdict(list)
         for t in threads:
             if t.focus_tag.strip():
-                grouped[(t.learner_id, t.focus_tag.strip().casefold())].append(t)
+                grouped[(t.cohort_id, t.learner_id, t.focus_tag.strip().casefold())].append(t)
         recurring = []
-        for (learner_id, _), items in grouped.items():
+        for (group_cohort_id, learner_id, _), items in grouped.items():
             if len({t.assignment_id for t in items}) < 2:
                 continue
             learner = db.get(User, learner_id)
             recurring.append({
                 "learner": learner.name, "learner_id": learner_id,
+                "cohort_id": group_cohort_id,
                 "focus": items[0].focus_tag, "feedback_count": len(items),
                 "assignment_count": len({t.assignment_id for t in items}),
                 "threads": [{"feedback_id": t.id, "assignment": db.get(Assignment, t.assignment_id).title}

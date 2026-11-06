@@ -249,6 +249,7 @@ class NewFeedback(BaseModel):
 
 
 class NewCriterion(BaseModel):
+    cohort_id: str
     code: str = Field(min_length=1, max_length=30)
     description: str = Field(min_length=1, max_length=300)
 
@@ -346,6 +347,7 @@ def seed_demo(db: Session) -> None:
         ("database", "learner-2", "LO1 · Normalisation", "Your functional dependencies are clear. Continue checking for transitive dependencies.", "Review the tables for third normal form.", "Data modelling", CLOSED, True),
         ("web", "learner-2", "LO1 · Structure", "You have made a confident start and organised the pages well.", "", "", INFORMATION, False),
     ]
+    seeded_threads = {}
     for a, learner, criterion, words, step, tag, status, required in samples:
         thread = Feedback(
             assignment_id=a, cohort_id="computing-26", learner_id=learner, tutor_id="tutor-1", criterion=criterion,
@@ -356,10 +358,22 @@ def seed_demo(db: Session) -> None:
         )
         db.add(thread)
         db.flush()
+        seeded_threads[(learner, a)] = thread.id
         db.add(TeamsHandoff(
             feedback_id=thread.id, learner_id=learner,
             teams_reference="Teams demo assignment " + a, confirmed_by="tutor-1",
         ))
+    sample_target = ImprovementTarget(
+        cohort_id="computing-26", learner_id="learner-1", tutor_id="tutor-1",
+        title="Explain and test design decisions",
+        guidance="When responding to feedback, explain why your change works and demonstrate how you checked it.",
+    )
+    db.add(sample_target)
+    db.flush()
+    db.add_all([
+        TargetLink(target_id=sample_target.id, feedback_id=seeded_threads[("learner-1", "java")]),
+        TargetLink(target_id=sample_target.id, feedback_id=seeded_threads[("learner-1", "web")]),
+    ])
     db.commit()
 
 
@@ -494,6 +508,166 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
                             CohortAssignment.cohort_id.in_(cohort_ids(db, person)))))).all()
             ] if person.role == "tutor" else [],
         }
+
+
+    @app.get("/api/cohorts")
+    def list_cohorts(person: User = Depends(actor), db: Session = Depends(database)):
+        """Only approved cohort memberships are visible; never enumerate the whole College."""
+        if person.role not in ("tutor", "learner"):
+            raise HTTPException(403, "Cohort membership required.")
+        records = db.scalars(select(Cohort).where(Cohort.id.in_(cohort_ids(db, person)))).all()
+        return [{
+            "id": c.id, "name": c.name,
+            "course": db.get(Course, c.course_id).title,
+            "academic_year": c.academic_year,
+            "learners": [
+                {"id": student.id, "name": student.name}
+                for e in db.scalars(select(Enrollment).where(
+                    Enrollment.cohort_id == c.id,
+                    Enrollment.member_role == "learner")).all()
+                if (student := db.get(User, e.user_id)) is not None
+            ] if person.role == "tutor" else None,
+        } for c in records]
+
+    @app.get("/api/assignments/{assignment_id}/criteria")
+    def list_criteria(assignment_id: str, cohort_id: str, person: User = Depends(actor),
+                      db: Session = Depends(database)):
+        if not is_authorised_assignment(db, assignment_id, person, cohort_id):
+            raise HTTPException(404, "Assignment not found.")
+        criteria = db.scalars(select(Criterion).where(
+            Criterion.assignment_id == assignment_id).order_by(Criterion.sort_order, Criterion.id)).all()
+        return [{"id": c.id, "code": c.code, "description": c.description} for c in criteria]
+
+    @app.post("/api/assignments/{assignment_id}/criteria", status_code=201)
+    def create_criterion(assignment_id: str, payload: NewCriterion,
+                         person: User = Depends(actor), db: Session = Depends(database)):
+        if person.role != "tutor" or not is_authorised_assignment(db, assignment_id, person, payload.cohort_id):
+            raise HTTPException(403, "Assigned tutor required.")
+        if not payload.code.strip() or not payload.description.strip():
+            raise HTTPException(422, "Criterion code and description are required.")
+        criterion = Criterion(assignment_id=assignment_id, code=payload.code.strip().upper(),
+                              description=payload.description.strip())
+        db.add(criterion)
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(409, "Criterion already exists for this assignment.") from exc
+        db.refresh(criterion)
+        return {"id": criterion.id, "assignment_id": assignment_id,
+                "code": criterion.code, "description": criterion.description}
+
+    def get_target(db: Session, person: User, target_id: int) -> ImprovementTarget:
+        target = db.get(ImprovementTarget, target_id)
+        if not target or target.cohort_id not in cohort_ids(db, person):
+            raise HTTPException(404, "Target not found.")
+        if person.role == "learner" and target.learner_id != person.id:
+            raise HTTPException(404, "Target not found.")
+        if person.role == "tutor" and target.tutor_id != person.id:
+            raise HTTPException(404, "Target not found.")
+        if person.role not in ("tutor", "learner"):
+            raise HTTPException(403, "Not authorised.")
+        return target
+
+    def target_payload(db: Session, target: ImprovementTarget) -> dict:
+        links = db.scalars(select(TargetLink).where(
+            TargetLink.target_id == target.id).order_by(TargetLink.id)).all()
+        threads = [db.get(Feedback, l.feedback_id) for l in links]
+        reviews = db.scalars(select(TargetReview).where(
+            TargetReview.target_id == target.id).order_by(TargetReview.id)).all()
+        return {
+            "id": target.id, "title": target.title, "guidance": target.guidance,
+            "status": target.status, "cohort_id": target.cohort_id,
+            "learner_id": target.learner_id, "learner": db.get(User, target.learner_id).name,
+            "tutor_id": target.tutor_id, "created_at": stamp(target.created_at),
+            "achieved_at": stamp(target.achieved_at),
+            "linked_feedback": [
+                {"feedback_id": t.id, "assignment": db.get(Assignment, t.assignment_id).title,
+                 "assignment_id": t.assignment_id, "status": t.status}
+                for t in threads if t
+            ],
+            "history": [
+                {"status": v.status, "reason": v.reason,
+                 "at": stamp(v.created_at), "tutor": db.get(User, v.tutor_id).name}
+                for v in reviews
+            ],
+            "can_achieve": any(t is not None and t.status == CLOSED for t in threads),
+        }
+
+    @app.get("/api/targets")
+    def list_targets(person: User = Depends(actor), db: Session = Depends(database)):
+        if person.role not in ("tutor", "learner"):
+            raise HTTPException(403, "Targets belong to tutors and learners.")
+        condition = (ImprovementTarget.tutor_id == person.id if person.role == "tutor"
+                     else ImprovementTarget.learner_id == person.id)
+        results = db.scalars(select(ImprovementTarget).where(
+            condition, ImprovementTarget.cohort_id.in_(cohort_ids(db, person))
+        ).order_by(ImprovementTarget.created_at.desc())).all()
+        return [target_payload(db, t) for t in results]
+
+    @app.get("/api/targets/{target_id}")
+    def target_detail(target_id: int, person: User = Depends(actor), db: Session = Depends(database)):
+        return target_payload(db, get_target(db, person, target_id))
+
+    @app.post("/api/targets", status_code=201)
+    def create_target(payload: NewTarget, person: User = Depends(actor),
+                      db: Session = Depends(database)):
+        if person.role != "tutor" or payload.cohort_id not in cohort_ids(db, person):
+            raise HTTPException(403, "Assigned tutor required.")
+        learner = db.get(User, payload.learner_id)
+        if not learner or learner.role != "learner" or payload.cohort_id not in cohort_ids(db, learner):
+            raise HTTPException(403, "Learner is not enrolled in the tutor's cohort.")
+        if not payload.title.strip() or not payload.guidance.strip():
+            raise HTTPException(422, "Title and tutor-authored guidance are required.")
+        target = ImprovementTarget(
+            cohort_id=payload.cohort_id, learner_id=learner.id, tutor_id=person.id,
+            title=payload.title.strip(), guidance=payload.guidance.strip(),
+        )
+        db.add(target)
+        db.commit()
+        return target_payload(db, target)
+
+    @app.post("/api/targets/{target_id}/links", status_code=201)
+    def link_target(target_id: int, payload: TargetLinkRequest,
+                    person: User = Depends(actor), db: Session = Depends(database)):
+        if person.role != "tutor":
+            raise HTTPException(403, "Tutors link feedback to targets.")
+        target = get_target(db, person, target_id)
+        feedback = accessible(db, person, payload.feedback_id)
+        if target.status != "OPEN" or feedback.learner_id != target.learner_id or feedback.cohort_id != target.cohort_id:
+            raise HTTPException(403, "Feedback must belong to the target's learner and cohort.")
+        db.add(TargetLink(target_id=target.id, feedback_id=feedback.id))
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(409, "Feedback is already linked to this target.") from exc
+        return target_payload(db, target)
+
+    @app.post("/api/targets/{target_id}/status")
+    def review_target(target_id: int, payload: TargetDecision,
+                      person: User = Depends(actor), db: Session = Depends(database)):
+        if person.role != "tutor":
+            raise HTTPException(403, "Only a tutor can confirm target achievement.")
+        target = get_target(db, person, target_id)
+        if target.status == payload.status:
+            raise HTTPException(409, "Target is already in that state.")
+        if not payload.reason.strip() or len(payload.reason.strip()) < 15:
+            raise HTTPException(422, "Explain the professional judgement in at least 15 characters.")
+        if payload.status == "ACHIEVED":
+            linked_ids = select(TargetLink.feedback_id).where(TargetLink.target_id == target.id)
+            completed = db.scalar(select(Feedback.id).where(
+                Feedback.id.in_(linked_ids), Feedback.status == CLOSED,
+                Feedback.cohort_id == target.cohort_id, Feedback.learner_id == target.learner_id
+            ).limit(1))
+            if completed is None:
+                raise HTTPException(409, "Close at least one linked feedback action before marking achieved.")
+        target.status = payload.status
+        target.achieved_at = utcnow() if payload.status == "ACHIEVED" else None
+        db.add(TargetReview(target_id=target.id, tutor_id=person.id,
+                            status=payload.status, reason=payload.reason.strip()))
+        db.commit()
+        return target_payload(db, target)
 
     @app.get("/api/threads")
     def list_threads(person: User = Depends(actor), db: Session = Depends(database)):

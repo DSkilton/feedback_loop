@@ -426,6 +426,8 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             raise HTTPException(404, "Feedback not found.")
         if person.role == "admin":
             raise HTTPException(403, "Admin reports are aggregate only.")
+        if thread.cohort_id not in cohort_ids(db, person):
+            raise HTTPException(404, "Feedback not found.")
         return thread
 
     def summarise(db: Session, thread: Feedback) -> dict:
@@ -434,7 +436,10 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         return {
             "id": thread.id, "assignment": assignment.title, "module": assignment.module,
             "learner": learner.name, "learner_id": thread.learner_id,
-            "criterion": thread.criterion, "feedback_text": thread.feedback_text,
+            "criterion": thread.criterion, "criterion_id": thread.criterion_id,
+            "cohort_id": thread.cohort_id,
+            "cohort_name": db.get(Cohort, thread.cohort_id).name if thread.cohort_id else None,
+            "feedback_text": thread.feedback_text,
             "next_step": thread.next_step, "focus_tag": thread.focus_tag,
             "teams_reference": thread.teams_reference, "feedback_required": thread.feedback_required,
             "status": thread.status, "updated_at": stamp(thread.updated_at), "closed_at": stamp(thread.closed_at),
@@ -462,11 +467,32 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         return {
             "auth_mode": mode, "csrf_token": request.session.get("csrf") if entra_config else None,
             "user": {"id": person.id, "name": person.name, "role": person.role},
-            "assignments": [{"id": a.id, "title": a.title, "module": a.module}
-                            for a in db.scalars(select(Assignment)).all()] if person.role == "tutor" else [],
-            "learners": [{"id": u.id, "name": u.name}
-                         for u in db.scalars(select(User).where(User.role == "learner")).all()]
-                         if person.role == "tutor" else [],
+            "cohorts": [
+                {"id": c.id, "name": c.name, "academic_year": c.academic_year,
+                 "course": db.get(Course, c.course_id).title}
+                for c in db.scalars(select(Cohort).where(Cohort.id.in_(cohort_ids(db, person)))).all()
+            ] if person.role != "admin" else [],
+            "assignments": [
+                {"id": a.id, "title": a.title, "module": a.module, "cohort_id": m.cohort_id}
+                for m in db.scalars(select(CohortAssignment).where(
+                    CohortAssignment.cohort_id.in_(cohort_ids(db, person)))).all()
+                if (a := db.get(Assignment, m.assignment_id)) is not None
+            ] if person.role == "tutor" else [],
+            "learners": [
+                {"id": u.id, "name": u.name, "cohort_id": e.cohort_id}
+                for e in db.scalars(select(Enrollment).where(
+                    Enrollment.cohort_id.in_(cohort_ids(db, person)),
+                    Enrollment.member_role == "learner")).all()
+                if (u := db.get(User, e.user_id)) is not None
+            ] if person.role == "tutor" else [],
+            "criteria": [
+                {"id": c.id, "assignment_id": c.assignment_id, "code": c.code,
+                 "description": c.description}
+                for c in db.scalars(select(Criterion).where(
+                    Criterion.assignment_id.in_(
+                        select(CohortAssignment.assignment_id).where(
+                            CohortAssignment.cohort_id.in_(cohort_ids(db, person)))))).all()
+            ] if person.role == "tutor" else [],
         }
 
     @app.get("/api/threads")
@@ -474,7 +500,9 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         if person.role == "admin":
             raise HTTPException(403, "Use aggregate reports.")
         condition = Feedback.learner_id == person.id if person.role == "learner" else Feedback.tutor_id == person.id
-        threads = db.scalars(select(Feedback).where(condition).order_by(Feedback.updated_at.desc())).all()
+        threads = db.scalars(select(Feedback).where(
+            condition, Feedback.cohort_id.in_(cohort_ids(db, person))
+        ).order_by(Feedback.updated_at.desc())).all()
         return [summarise(db, t) for t in threads]
 
     @app.get("/api/threads/{fid}")
@@ -503,6 +531,27 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         learner = db.get(User, payload.learner_id)
         if learner is None or learner.role != "learner" or db.get(Assignment, payload.assignment_id) is None:
             raise HTTPException(422, "Choose a valid learner and assignment.")
+        permitted = eligible_cohorts(db, payload.assignment_id, person.id, learner.id)
+        if not permitted:
+            raise HTTPException(403, "Tutor and learner must share the assigned cohort.")
+        if payload.cohort_id:
+            if payload.cohort_id not in permitted:
+                raise HTTPException(403, "Assignment is not shared in the selected cohort.")
+            selected_cohort = payload.cohort_id
+        elif len(permitted) == 1:
+            selected_cohort = next(iter(permitted))
+        else:
+            raise HTTPException(422, "Choose the cohort for this feedback.")
+        criterion = None
+        if payload.criterion_id is not None:
+            criterion = db.get(Criterion, payload.criterion_id)
+            if criterion is None or criterion.assignment_id != payload.assignment_id:
+                raise HTTPException(422, "Assessment criterion does not belong to the assignment.")
+        target = None
+        if payload.target_id is not None:
+            target = db.get(ImprovementTarget, payload.target_id)
+            if not target or target.status != "OPEN" or target.cohort_id != selected_cohort or target.learner_id != learner.id or target.tutor_id != person.id:
+                raise HTTPException(403, "Target is not accessible for this learner and cohort.")
         if not payload.feedback_text.strip() or (payload.feedback_required and not payload.next_step.strip()):
             raise HTTPException(422, "Feedback text and, when required, an actionable next step are needed.")
         if not payload.teams_recorded_confirmed:
@@ -520,8 +569,11 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             if existing:
                 raise HTTPException(409, "This Teams learner submission has an existing feedback loop.")
         thread = Feedback(
-            assignment_id=payload.assignment_id, learner_id=learner.id, tutor_id=person.id,
-            criterion=payload.criterion.strip(), feedback_text=payload.feedback_text.strip(),
+            assignment_id=payload.assignment_id, cohort_id=selected_cohort,
+            criterion_id=criterion.id if criterion else None,
+            learner_id=learner.id, tutor_id=person.id,
+            criterion=f"{criterion.code} · {criterion.description}" if criterion else payload.criterion.strip(),
+            feedback_text=payload.feedback_text.strip(),
             next_step=payload.next_step.strip(), focus_tag=payload.focus_tag.strip(),
             teams_reference=payload.teams_reference.strip(), feedback_required=payload.feedback_required,
             status=ACTION_REQUIRED if payload.feedback_required else INFORMATION,
@@ -536,6 +588,8 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             teams_submission_id=teams_ids[2] or None,
             confirmed_by=person.id,
         ))
+        if target is not None:
+            db.add(TargetLink(target_id=target.id, feedback_id=thread.id))
         db.add(Event(feedback_id=thread.id, actor_id=person.id,
                      description="Tutor confirmed initial feedback in Teams and shared an action"))
         try:
@@ -631,7 +685,9 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
     def tutor_focus(person: User = Depends(actor), db: Session = Depends(database)):
         if person.role != "tutor":
             raise HTTPException(403, "Tutor role required.")
-        threads = db.scalars(select(Feedback).where(Feedback.tutor_id == person.id)).all()
+        threads = db.scalars(select(Feedback).where(
+            Feedback.tutor_id == person.id,
+            Feedback.cohort_id.in_(cohort_ids(db, person)))).all()
         grouped = defaultdict(list)
         for t in threads:
             if t.focus_tag.strip():

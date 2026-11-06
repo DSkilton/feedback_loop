@@ -278,6 +278,33 @@ class NewComment(BaseModel):
     body: str = Field(min_length=1, max_length=2000)
 
 
+
+def cohort_ids(db: Session, user: User) -> set[str]:
+    if user.role not in ("learner", "tutor"):
+        return set()
+    return set(db.scalars(select(Enrollment.cohort_id).where(
+        Enrollment.user_id == user.id, Enrollment.member_role == user.role)).all())
+
+
+def eligible_cohorts(db: Session, assignment_id: str, tutor_id: str, learner_id: str) -> set[str]:
+    mapped = set(db.scalars(select(CohortAssignment.cohort_id).where(
+        CohortAssignment.assignment_id == assignment_id)).all())
+    staff = set(db.scalars(select(Enrollment.cohort_id).where(
+        Enrollment.user_id == tutor_id, Enrollment.member_role == "tutor")).all())
+    students = set(db.scalars(select(Enrollment.cohort_id).where(
+        Enrollment.user_id == learner_id, Enrollment.member_role == "learner")).all())
+    return mapped & staff & students
+
+
+def is_authorised_assignment(db: Session, assignment_id: str, actor: User, cohort_id: str) -> bool:
+    return (
+        cohort_id in cohort_ids(db, actor)
+        and db.scalar(select(CohortAssignment.id).where(
+            CohortAssignment.cohort_id == cohort_id,
+            CohortAssignment.assignment_id == assignment_id)) is not None
+    )
+
+
 def seed_demo(db: Session) -> None:
     if db.get(User, "tutor-1"):
         return
@@ -286,9 +313,29 @@ def seed_demo(db: Session) -> None:
         User(id="learner-1", name="Alex Taylor", role="learner"),
         User(id="learner-2", name="Morgan Ellis", role="learner"),
         User(id="admin-1", name="Quality Team", role="admin"),
+        User(id="tutor-2", name="Sam Patel", role="tutor"),
+        User(id="learner-3", name="Jamie Reed", role="learner"),
+        Course(id="computing", title="Computing"),
+        Cohort(id="computing-26", course_id="computing", name="Computing Pilot A", academic_year="2026/27"),
+        Cohort(id="web-26", course_id="computing", name="Computing Pilot B", academic_year="2026/27"),
         Assignment(id="java", title="Java Library System", module="Programming"),
         Assignment(id="database", title="Database Design", module="Databases"),
         Assignment(id="web", title="Accessible Portfolio", module="Web Development"),
+    ])
+    db.flush()
+    db.add_all([
+        Enrollment(cohort_id="computing-26", user_id="tutor-1", member_role="tutor"),
+        Enrollment(cohort_id="computing-26", user_id="learner-1", member_role="learner"),
+        Enrollment(cohort_id="computing-26", user_id="learner-2", member_role="learner"),
+        Enrollment(cohort_id="web-26", user_id="tutor-2", member_role="tutor"),
+        Enrollment(cohort_id="web-26", user_id="learner-3", member_role="learner"),
+        *(CohortAssignment(cohort_id="computing-26", assignment_id=a)
+          for a in ("java", "database", "web")),
+        CohortAssignment(cohort_id="web-26", assignment_id="web"),
+        Criterion(assignment_id="java", code="LO2", description="Use abstraction and encapsulation"),
+        Criterion(assignment_id="java", code="LO3", description="Implement automated tests"),
+        Criterion(assignment_id="database", code="LO1", description="Design and normalise a relational model"),
+        Criterion(assignment_id="web", code="LO3", description="Apply accessible interface principles"),
     ])
     db.flush()
     samples = [
@@ -301,7 +348,7 @@ def seed_demo(db: Session) -> None:
     ]
     for a, learner, criterion, words, step, tag, status, required in samples:
         thread = Feedback(
-            assignment_id=a, learner_id=learner, tutor_id="tutor-1", criterion=criterion,
+            assignment_id=a, cohort_id="computing-26", learner_id=learner, tutor_id="tutor-1", criterion=criterion,
             feedback_text=words, next_step=step, focus_tag=tag,
             teams_reference="Teams demo assignment " + a,
             status=status, feedback_required=required,

@@ -166,13 +166,15 @@ async function openThread(fid) {
     '<p>' + escapeHtml(t.feedback_text) + '</p></div>' +
     (t.feedback_required ? '<div class="detail-next"><span class="step-label">YOUR NEXT STEP</span><p>' + escapeHtml(t.next_step) + '</p></div>' : '<div class="detail-next info"><strong>No action required.</strong> This feedback is shared for information.</div>') +
     '<div class="teams-reference"><strong>Initial feedback in Teams</strong><span>' + escapeHtml(t.teams_reference) + '</span><small>Reference entered manually by the tutor. Sync is not enabled.</small></div></div>' +
+    (state.bootstrap.user.role === "learner" && t.status === "IN_PROGRESS" ?
+      '<label class="progress-prompt" for="progressEvidence">What have you changed?<textarea id="progressEvidence" rows="3" maxlength="2000" placeholder="Describe the changes you made and how they address the feedback."></textarea><small>This explanation is saved to your conversation when you submit for review.</small></label>' : '') +
     '<div class="detail-actions">' + actionButtons(t) + '</div>' +
     '<div class="timeline"><h3>Conversation and progress history</h3>' +
     (t.timeline.length ? t.timeline.map((entry) =>
       '<div class="timeline-entry"><span class="timeline-marker ' + (entry.type === "comment" ? "marker-comment" : "") + '"></span><div><div class="timeline-meta"><strong>' + escapeHtml(entry.actor) + '</strong><span>' + niceDate(entry.at) + '</span></div><p>' + escapeHtml(entry.text).replace(/\n/g, "<br>") + '</p></div></div>'
     ).join("") : '<p class="quiet">No updates recorded yet.</p>') +
     '</div><form id="commentForm" class="comment-form"><label for="commentText">Add to the conversation</label><textarea name="commentText" id="commentText" rows="3" maxlength="2000" required placeholder="Explain progress, ask for support, or offer guidance."></textarea><button class="button-primary" type="submit">Post comment</button></form>';
-  $("threadDialog").showModal();
+  if (!$("threadDialog").open) $("threadDialog").showModal();
   $("commentForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
@@ -184,7 +186,8 @@ async function openThread(fid) {
 }
 async function changeStatus(fid, status) {
   try {
-    await api("/api/threads/" + fid + "/status", { method: "POST", body: JSON.stringify({ status }) });
+    const progress_note = $("progressEvidence")?.value || "";
+    await api("/api/threads/" + fid + "/status", { method: "POST", body: JSON.stringify({ status, progress_note }) });
     $("threadDialog").close();
     await refresh();
     notify("Progress updated");

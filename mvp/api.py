@@ -57,13 +57,88 @@ class Assignment(Base):
     __tablename__ = "mvp_assignments"
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     title: Mapped[str] = mapped_column(String(120))
+
     module: Mapped[str] = mapped_column(String(100))
+
+
+class Course(Base):
+    __tablename__ = "mvp_courses"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    title: Mapped[str] = mapped_column(String(120))
+
+
+class Cohort(Base):
+    __tablename__ = "mvp_cohorts"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    course_id: Mapped[str] = mapped_column(ForeignKey("mvp_courses.id"))
+    name: Mapped[str] = mapped_column(String(120))
+    academic_year: Mapped[str] = mapped_column(String(20))
+
+
+class Enrollment(Base):
+    __tablename__ = "mvp_enrolments"
+    __table_args__ = (UniqueConstraint("cohort_id", "user_id", name="uq_mvp_enrolment"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cohort_id: Mapped[str] = mapped_column(ForeignKey("mvp_cohorts.id"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("mvp_users.id"))
+    member_role: Mapped[str] = mapped_column(String(20))
+
+
+class CohortAssignment(Base):
+    __tablename__ = "mvp_cohort_assignments"
+    __table_args__ = (UniqueConstraint("cohort_id", "assignment_id", name="uq_mvp_cohort_assignment"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cohort_id: Mapped[str] = mapped_column(ForeignKey("mvp_cohorts.id"))
+    assignment_id: Mapped[str] = mapped_column(ForeignKey("mvp_assignments.id"))
+
+
+class Criterion(Base):
+    __tablename__ = "mvp_criteria"
+    __table_args__ = (UniqueConstraint("assignment_id", "code", name="uq_mvp_assignment_criterion"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    assignment_id: Mapped[str] = mapped_column(ForeignKey("mvp_assignments.id"))
+    code: Mapped[str] = mapped_column(String(30))
+    description: Mapped[str] = mapped_column(String(300))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ImprovementTarget(Base):
+    __tablename__ = "mvp_improvement_targets"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cohort_id: Mapped[str] = mapped_column(ForeignKey("mvp_cohorts.id"))
+    learner_id: Mapped[str] = mapped_column(ForeignKey("mvp_users.id"))
+    tutor_id: Mapped[str] = mapped_column(ForeignKey("mvp_users.id"))
+    title: Mapped[str] = mapped_column(String(140))
+    guidance: Mapped[str] = mapped_column(String(1000), default="")
+    status: Mapped[str] = mapped_column(String(16), default="OPEN")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    achieved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class TargetLink(Base):
+    __tablename__ = "mvp_target_links"
+    __table_args__ = (UniqueConstraint("target_id", "feedback_id", name="uq_mvp_target_feedback"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    target_id: Mapped[int] = mapped_column(ForeignKey("mvp_improvement_targets.id"))
+    feedback_id: Mapped[int] = mapped_column(ForeignKey("mvp_feedback.id"))
+
+
+class TargetReview(Base):
+    __tablename__ = "mvp_target_reviews"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    target_id: Mapped[int] = mapped_column(ForeignKey("mvp_improvement_targets.id"))
+    tutor_id: Mapped[str] = mapped_column(ForeignKey("mvp_users.id"))
+    status: Mapped[str] = mapped_column(String(16))
+    reason: Mapped[str] = mapped_column(String(1000))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class Feedback(Base):
     __tablename__ = "mvp_feedback"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     assignment_id: Mapped[str] = mapped_column(ForeignKey("mvp_assignments.id"))
+    cohort_id: Mapped[str | None] = mapped_column(ForeignKey("mvp_cohorts.id"), nullable=True)
+    criterion_id: Mapped[int | None] = mapped_column(ForeignKey("mvp_criteria.id"), nullable=True)
     learner_id: Mapped[str] = mapped_column(ForeignKey("mvp_users.id"))
     tutor_id: Mapped[str] = mapped_column(ForeignKey("mvp_users.id"))
     criterion: Mapped[str] = mapped_column(String(160), default="")
@@ -157,6 +232,9 @@ def check_evidence(name: str, content: bytes) -> tuple[str, str]:
 class NewFeedback(BaseModel):
     assignment_id: str
     learner_id: str
+    cohort_id: str | None = None
+    criterion_id: int | None = Field(default=None, gt=0)
+    target_id: int | None = Field(default=None, gt=0)
     criterion: str = Field(default="", max_length=160)
     feedback_text: str = Field(min_length=1, max_length=4000)
     next_step: str = Field(default="", max_length=2000)
@@ -167,6 +245,28 @@ class NewFeedback(BaseModel):
     teams_assignment_id: str = Field(default="", max_length=100)
     teams_submission_id: str = Field(default="", max_length=100)
     feedback_required: bool = True
+
+
+
+class NewCriterion(BaseModel):
+    code: str = Field(min_length=1, max_length=30)
+    description: str = Field(min_length=1, max_length=300)
+
+
+class NewTarget(BaseModel):
+    cohort_id: str
+    learner_id: str
+    title: str = Field(min_length=4, max_length=140)
+    guidance: str = Field(default="", max_length=1000)
+
+
+class TargetLinkRequest(BaseModel):
+    feedback_id: int = Field(gt=0)
+
+
+class TargetDecision(BaseModel):
+    status: Literal["OPEN", "ACHIEVED"]
+    reason: str = Field(min_length=15, max_length=1000)
 
 
 class StatusChange(BaseModel):

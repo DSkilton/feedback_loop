@@ -23,6 +23,6 @@ jobs:
           python -m pip install -r mvp/requirements.txt
           python -m pip check
       - name: Run regression tests
-        run: pytest -q --cov=mvp --cov-report=term-missing
+        run: python -m pytest -q --cov=mvp --cov-report=term-missing
       - name: Check front-end JavaScript syntax
         run: node --check mvp/web/app.js

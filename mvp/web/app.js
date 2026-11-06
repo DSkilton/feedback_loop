@@ -11,7 +11,7 @@ const columns = [
   { key: "READY_FOR_REVIEW", name: "Ready for review", hint: "Tutor to check", tone: "violet" },
   { key: "CLOSED", name: "Completed", hint: "Closed by tutor", tone: "green" },
 ];
-const state = { identity: "tutor-1", mode: "disabled", bootstrap: null, threads: [], page: "board", learnerFilter: "all", selected: null };
+const state = { identity: "tutor-1", mode: "disabled", bootstrap: null, threads: [], targets: [], page: "board", learnerFilter: "all", cohortFilter: "all", selected: null };
 const $ = (id) => document.getElementById(id);
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -54,6 +54,7 @@ async function refresh() {
   try {
     state.bootstrap = await api("/api/bootstrap");
     state.threads = state.bootstrap.user.role === "admin" ? [] : await api("/api/threads");
+    state.targets = state.bootstrap.user.role === "admin" ? [] : await api("/api/targets");
     state.page = state.bootstrap.user.role === "admin" ? "reports" : "board";
     updateNavigation();
     $("entraLogout").hidden = state.mode !== "entra";
@@ -72,13 +73,16 @@ function updateNavigation() {
   document.querySelectorAll("[data-page]").forEach((button) => button.classList.toggle("active", button.dataset.page === state.page));
 }
 function filterThreads() {
-  return state.learnerFilter === "all" ? state.threads : state.threads.filter((item) => item.learner_id === state.learnerFilter);
+  return state.threads.filter((item) =>
+    (state.learnerFilter === "all" || item.learner_id === state.learnerFilter) &&
+    (state.cohortFilter === "all" || item.cohort_id === state.cohortFilter));
 }
 function card(thread) {
   const isTeacher = state.bootstrap.user.role === "tutor";
   const type = thread.feedback_required ? "Feedback required" : "For information";
   return '<article class="feedback-card" tabindex="0" aria-label="' + escapeHtml(thread.assignment) + ' feedback for ' + escapeHtml(thread.learner) + '">' +
     '<div class="card-top"><span class="module-label">' + escapeHtml(thread.module) + '</span><span class="card-date">' + niceDate(thread.updated_at) + '</span></div>' +
+    (isTeacher && thread.cohort_name ? '<div class="cohort-byline">' + escapeHtml(thread.cohort_name) + '</div>' : '') +
     '<h3>' + escapeHtml(thread.assignment) + '</h3>' +
     (isTeacher ? '<div class="learner-byline">↳ ' + escapeHtml(thread.learner) + '</div>' : '') +
     (thread.criterion ? '<div class="criterion">' + escapeHtml(thread.criterion) + '</div>' : '') +
@@ -98,14 +102,21 @@ function renderBoard() {
   const review = required.filter((t) => t.status === "READY_FOR_REVIEW").length;
   const done = required.filter((t) => t.status === "CLOSED").length;
   const roster = isTeacher
-    ? '<label class="filter-label">Learner <select id="learnerFilter"><option value="all">All learners</option>' +
-      state.bootstrap.learners.map((u) => '<option value="' + escapeHtml(u.id) + '"' + (u.id === state.learnerFilter ? " selected" : "") + '>' + escapeHtml(u.name) + '</option>').join("") + '</select></label>'
+    ? '<div class="board-filters"><label class="filter-label">Cohort <select id="cohortFilter"><option value="all">All my cohorts</option>' +
+      state.bootstrap.cohorts.map((c) => '<option value="' + escapeHtml(c.id) + '"' + (c.id === state.cohortFilter ? " selected" : "") + '>' + escapeHtml(c.name) + '</option>').join("") + '</select></label>' +
+      '<label class="filter-label">Learner <select id="learnerFilter"><option value="all">All learners</option>' +
+      state.bootstrap.learners.filter((u) => state.cohortFilter === "all" || u.cohort_id === state.cohortFilter)
+        .filter((u, idx, arr) => arr.findIndex((other) => other.id === u.id) === idx)
+        .map((u) => '<option value="' + escapeHtml(u.id) + '"' + (u.id === state.learnerFilter ? " selected" : "") + '>' + escapeHtml(u.name) + '</option>').join("") +
+      '</select></label></div>'
     : "";
   $("app").innerHTML =
     '<section class="page-heading"><div><div class="eyebrow">WELCOME BACK, ' + escapeHtml(fullName.toUpperCase()) + '</div><h1>' + headline + '</h1><p>' + greeting + '</p></div>' +
     (isTeacher ? '<button class="button-primary" id="createButton" type="button">＋ Share feedback</button>' : '<span class="pale-pill">Your private workspace</span>') + '</section>' +
     '<div class="intro-strip"><span class="intro-symbol">✦</span><p><strong>Feedback is a conversation.</strong> Read your tutor’s comments, take the next step, and submit your work for review. Only a tutor can close the loop.</p></div>' +
     '<section class="metrics" aria-label="Board overview"><div class="metric"><span>Actions on board</span><strong>' + required.length + '</strong></div><div class="metric"><span>In progress</span><strong>' + working + '</strong></div><div class="metric"><span>Awaiting tutor</span><strong>' + review + '</strong></div><div class="metric"><span>Completed</span><strong>' + done + '</strong></div></section>' +
+    (isTeacher ? renderCohortOverview() : '') +
+    renderTargetsSection() +
     (isTeacher ? '<section class="focus-section" id="focusSection" aria-label="Repeated development needs"><h2>Recurring development needs</h2><p>Checking teacher-assigned focus tags across assignments…</p></section>' : '') +
     '<div class="board-controls"><div><h2>Feedback journey</h2><p>Move your work forward. Keep the discussion open.</p></div>' + roster + '</div>' +
     '<section class="kanban" aria-label="Feedback progress board">' + columns.map((column) => {
@@ -120,6 +131,12 @@ function renderBoard() {
   if (isTeacher) $("createButton").addEventListener("click", openCreate);
   const select = $("learnerFilter");
   if (select) select.addEventListener("change", async (event) => { state.learnerFilter = event.target.value; await render(); });
+  const cohort = $("cohortFilter");
+  if (cohort) cohort.addEventListener("change", async (event) => {
+    state.cohortFilter = event.target.value;
+    state.learnerFilter = "all";
+    await render();
+  });
 }
 async function renderReports() {
   const report = await api("/api/reports");
@@ -144,7 +161,9 @@ async function renderTutorFocus() {
   const target = $("focusSection");
   if (!target || state.bootstrap.user.role !== "tutor") return;
   const data = await api("/api/tutor/focus-areas");
-  const filtered = data.recurring.filter((item) => state.learnerFilter === "all" || item.learner_id === state.learnerFilter);
+  const filtered = data.recurring.filter((item) =>
+    (state.learnerFilter === "all" || item.learner_id === state.learnerFilter) &&
+    (state.cohortFilter === "all" || item.cohort_id === state.cohortFilter));
   target.innerHTML = '<div class="focus-heading"><div><h2>Recurring development needs</h2><p>Focus areas manually tagged by teachers across two or more assignments</p></div><span class="tag tag-neutral">' + filtered.length + ' observations</span></div>' +
     (filtered.length
       ? '<div class="focus-grid">' + filtered.map((f) =>

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Feedback Loop: a tutor-led, learner-owned improvement journey.">
+  <title>Feedback Loop · College pilot</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="identity">
+        <span class="brand-icon" aria-hidden="true">↗</span>
+        <div><strong>Feedback Loop</strong><small>Computing pilot</small></div>
+      </div>
+      <div class="section-label">WORKSPACE</div>
+      <nav aria-label="Main navigation">
+        <button id="boardNav" class="nav-link active" type="button" data-page="board"><span aria-hidden="true">▦</span> Improvement board</button>
+        <button id="reportsNav" class="nav-link" type="button" data-page="reports"><span aria-hidden="true">▥</span> Quality reporting</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="privacy"><span aria-hidden="true">♧</span><p><strong>People before process.</strong><br>Feedback is written by teachers, not AI.</p></div>
+        <small>Local prototype · Synthetic data only</small>
+      </div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <span class="eyebrow">MIDDLESBROUGH COLLEGE · CONCEPT PILOT</span>
+        <div class="topbar-right">
+          <span class="demo-badge">DEMO MODE</span>
+          <label class="identity-select-label" for="identitySelect">View as</label>
+          <select id="identitySelect" aria-label="Switch synthetic demonstration identity">
+            <option value="tutor-1">Jo Morgan · Tutor</option>
+            <option value="learner-1">Alex Taylor · Learner</option>
+            <option value="learner-2">Morgan Ellis · Learner</option>
+            <option value="admin-1">Quality Team · Administrator</option>
+          </select>
+        </div>
+      </header>
+      <main id="app" aria-live="polite">
+        <p class="loading">Loading demonstration…</p>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="threadDialog" class="detail-dialog" aria-labelledby="detailTitle">
+    <div class="modal-header">
+      <div><span class="eyebrow">FEEDBACK CONVERSATION</span><h2 id="detailTitle">Feedback details</h2></div>
+      <button class="close-icon" type="button" data-close="threadDialog" aria-label="Close details">×</button>
+    </div>
+    <div id="threadDetail" class="modal-scroll"></div>
+  </dialog>
+
+  <dialog id="newDialog" class="create-dialog" aria-labelledby="newTitle">
+    <div class="modal-header">
+      <div><span class="eyebrow">TEACHER-AUTHORED FEEDBACK</span><h2 id="newTitle">Share feedback</h2></div>
+      <button class="close-icon" type="button" data-close="newDialog" aria-label="Close form">×</button>
+    </div>
+    <form id="newForm" class="feedback-form">
+      <label>Learning assignment<select name="assignment_id" id="assignmentSelect" required></select></label>
+      <label>Learner<select name="learner_id" id="learnerSelect" required></select></label>
+      <label>Assessment criterion <span class="optional">(optional)</span><input name="criterion" maxlength="160" placeholder="e.g. LO2 · Encapsulation"></label>
+      <label>Teacher's feedback<textarea name="feedback_text" required maxlength="4000" rows="3" placeholder="Specific strengths and development points written by you"></textarea></label>
+      <label>Next step<input name="next_step" maxlength="2000" placeholder="A specific action for the student to take"></label>
+      <label>Development focus <span class="optional">(optional)</span><input name="focus_tag" maxlength="50" placeholder="e.g. Debugging"></label>
+      <label>Teams feedback reference<input name="teams_reference" required minlength="3" maxlength="200" placeholder="Teams assignment link or reference"></label>
+      <label class="tick-row"><input name="feedback_required" type="checkbox" checked> <span><strong>Feedback requires student action</strong><small>Untick for feedback shared for information only</small></span></label>
+      <p class="help">Record initial feedback in Teams as well. This pilot does not automatically sync with Microsoft Teams.</p>
+      <div id="createError" class="form-error" role="alert"></div>
+      <div class="form-buttons"><button type="button" class="button-ghost" data-close="newDialog">Cancel</button><button type="submit" class="button-primary">Share feedback</button></div>
+    </form>
+  </dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

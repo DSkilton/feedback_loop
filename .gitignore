@@ -214,3 +214,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# Feedback Loop local synthetic MVP state
+feedback_loop_mvp.db
+feedback_loop_mvp.db-*
+*.sqlite3

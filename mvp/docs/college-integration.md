@@ -48,7 +48,7 @@ After sign-in, the app stores only an approved mapped identity and CSRF token in
 ### Additional release requirements
 
 - Secure staff/student provisioning, cohorts, tutor-to-learner assignment validation and offboarding.
-- College IT security review, NHS/UK GDPR? **No**: use the College's applicable UK GDPR and safeguarding policies, not health-sector requirements.
+- College IT security review against applicable UK GDPR, College information-security and safeguarding policies.
 - DPIA screening, lawful basis, privacy notice, retention/deletion and right-of-access procedures.
 - Backend authorization tests against the **real** roster, and a comprehensive penetration review.
 - Production secret rotation, session revocation, HTTPS security controls, monitoring, backups and database migrations.

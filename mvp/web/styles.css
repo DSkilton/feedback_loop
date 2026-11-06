@@ -196,3 +196,7 @@ dialog::backdrop { background: #1627448c; backdrop-filter: blur(3px); }
   .bar-row { grid-template-columns: 100px minmax(30px,1fr) 16px; }
   .modal-header, .modal-scroll, .feedback-form { padding-left: 17px; padding-right: 17px; }
 }
+
+.progress-prompt { display: flex; flex-direction: column; gap: 8px; margin: 20px 0 16px; font-size: 12px; font-weight: 700; color: #3d5573; }
+.progress-prompt textarea { border: 1px solid #cbd9eb; border-radius: 8px; width: 100%; padding: 12px; color: #253b55; font-size: 12px; font-weight: 400; resize: vertical; }
+.progress-prompt small { color: #8697ac; font-weight: 400; line-height: 1.5; }

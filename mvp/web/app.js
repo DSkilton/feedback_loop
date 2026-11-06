@@ -249,19 +249,7 @@ async function changeStatus(fid, status) {
     const progress_note = $("progressEvidence")?.value || "";
     await api("/api/threads/" + fid + "/status", { method: "POST", body: JSON.stringify({ status, progress_note }) });
     $("threadDialog").close();
-    await async function initialise() {
-  try {
-    const res = await fetch("/api/auth-mode");
-    state.mode = (await res.json()).mode;
-  } catch (_) { state.mode = "disabled"; }
-  const isDemo = state.mode === "demo";
-  $("demoBadge").hidden = !isDemo;
-  $("identityLabel").hidden = !isDemo;
-  $("identitySelect").hidden = !isDemo;
-  $("entraLogin").hidden = state.mode !== "entra";
-  await refresh();
-}
-initialise();
+    await refresh();
     notify("Progress updated");
   } catch (error) { notify(error.message); }
 }
@@ -318,4 +306,16 @@ $("newForm").addEventListener("submit", async (event) => {
     notify("Teacher feedback added to the board");
   } catch (error) { $("createError").textContent = error.message; }
 });
-refresh();
+async function initialise() {
+  try {
+    const res = await fetch("/api/auth-mode");
+    state.mode = (await res.json()).mode;
+  } catch (_) { state.mode = "disabled"; }
+  const isDemo = state.mode === "demo";
+  $("demoBadge").hidden = !isDemo;
+  $("identityLabel").hidden = !isDemo;
+  $("identitySelect").hidden = !isDemo;
+  $("entraLogin").hidden = state.mode !== "entra";
+  await refresh();
+}
+initialise();

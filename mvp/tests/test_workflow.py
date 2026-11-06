@@ -32,7 +32,10 @@ def test_student_can_progress_own_work_but_cannot_close(client):
     fid = thread["id"]
     assert client.post(f"/api/threads/{fid}/status", json={"status": "CLOSED"}).status_code == 403
     assert client.post(f"/api/threads/{fid}/status", json={"status": "IN_PROGRESS"}).status_code == 200
-    assert client.post(f"/api/threads/{fid}/status", json={"status": "READY_FOR_REVIEW"}).status_code == 200
+    assert client.post(f"/api/threads/{fid}/status", json={"status": "READY_FOR_REVIEW"}).status_code == 422
+    assert client.post(f"/api/threads/{fid}/status", json={"status": "READY_FOR_REVIEW", "progress_note": "Added validation and tests."}).status_code == 200
+    history = client.get(f"/api/threads/{fid}").json()["timeline"]
+    assert any("Added validation and tests." in e["text"] for e in history)
     assert client.post(f"/api/threads/{fid}/status", json={"status": "CLOSED"}).status_code == 403
     assert client.post("/api/threads", json={}).status_code == 422  # invalid payload cannot be written
     assert client.get("/api/reports").status_code == 403

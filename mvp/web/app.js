@@ -264,15 +264,42 @@ async function render() {
     if (state.bootstrap.user.role === "tutor") await renderTutorFocus();
   }
 }
+function populateFeedbackChoices() {
+  const cohortId = $("cohortSelect").value;
+  const previousAssignment = $("assignmentSelect").value;
+  const available = state.bootstrap.assignments.filter((a) => a.cohort_id === cohortId);
+  $("assignmentSelect").innerHTML = available.map((a) =>
+    '<option value="' + escapeHtml(a.id) + '">' + escapeHtml(a.module + ' · ' + a.title) + '</option>').join('');
+  if (available.some((a) => a.id === previousAssignment)) $("assignmentSelect").value = previousAssignment;
+  $("learnerSelect").innerHTML = state.bootstrap.learners.filter((p) => p.cohort_id === cohortId)
+    .map((p) => '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(p.name) + '</option>').join('');
+  populateFeedbackRubricsAndTargets();
+}
+function populateFeedbackRubricsAndTargets(preferredCriterion) {
+  const aid = $("assignmentSelect").value;
+  const learner = $("learnerSelect").value;
+  const cohort = $("cohortSelect").value;
+  const criterion = $("criterionSelect");
+  criterion.innerHTML = '<option value="">No structured criterion</option>' +
+    state.bootstrap.criteria.filter((c) => c.assignment_id === aid)
+      .map((c) => '<option value="' + c.id + '">' + escapeHtml(c.code + ' · ' + c.description) + '</option>').join('');
+  if (preferredCriterion) criterion.value = String(preferredCriterion);
+  const target = $("targetSelect");
+  target.innerHTML = '<option value="">No long-term target</option>' +
+    state.targets.filter((t) => t.status === "OPEN" && t.learner_id === learner && t.cohort_id === cohort)
+      .map((t) => '<option value="' + t.id + '">' + escapeHtml(t.title) + '</option>').join('');
+}
 function openCreate() {
-  $("assignmentSelect").innerHTML = state.bootstrap.assignments.map((a) =>
-    '<option value="' + escapeHtml(a.id) + '">' + escapeHtml(a.module + " · " + a.title) + '</option>').join("");
-  $("learnerSelect").innerHTML = state.bootstrap.learners.map((u) =>
-    '<option value="' + escapeHtml(u.id) + '">' + escapeHtml(u.name) + '</option>').join("");
-  $("createError").textContent = "";
   $("newForm").reset();
+  $("createError").textContent = "";
+  const cohorts = state.bootstrap.cohorts;
+  $("cohortSelect").innerHTML = cohorts.map((c) =>
+    '<option value="' + escapeHtml(c.id) + '">' + escapeHtml(c.name) + '</option>').join('');
+  if (cohorts.some((c) => c.id === state.cohortFilter)) $("cohortSelect").value = state.cohortFilter;
+  populateFeedbackChoices();
   $("newDialog").showModal();
 }
+
 function teamsReference(value) {
   try {
     const parsed = new URL(value);
@@ -365,6 +392,7 @@ $("entraLogout").addEventListener("click", async () => {
 $("identitySelect").addEventListener("change", async (event) => {
   state.identity = event.target.value;
   state.learnerFilter = "all";
+  state.cohortFilter = "all";
   $("threadDialog").close();
   $("newDialog").close();
   await refresh();
@@ -395,6 +423,44 @@ document.addEventListener("click", async (event) => {
   const status = event.target.closest("[data-status]");
   if (status) { await changeStatus(status.dataset.id, status.dataset.status); return; }
 });
+$("cohortSelect").addEventListener("change", populateFeedbackChoices);
+$("assignmentSelect").addEventListener("change", () => populateFeedbackRubricsAndTargets());
+$("learnerSelect").addEventListener("change", () => populateFeedbackRubricsAndTargets());
+$("addCriterionButton").addEventListener("click", () => {
+  const assignment = state.bootstrap.assignments.find((a) =>
+    a.id === $("assignmentSelect").value && a.cohort_id === $("cohortSelect").value);
+  if (!assignment) return notify("Select a teaching assignment first.");
+  $("criterionForm").reset();
+  $("criterionError").textContent = "";
+  $("criterionContext").textContent = assignment.module + " · " + assignment.title;
+  $("criterionDialog").showModal();
+});
+$("criterionForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const aid = $("assignmentSelect").value;
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  payload.cohort_id = $("cohortSelect").value;
+  try {
+    const criterion = await api("/api/assignments/" + encodeURIComponent(aid) + "/criteria", {
+      method: "POST", body: JSON.stringify(payload),
+    });
+    state.bootstrap.criteria.push(criterion);
+    populateFeedbackRubricsAndTargets(criterion.id);
+    $("criterionDialog").close();
+    notify("Assessment criterion added");
+  } catch (error) { $("criterionError").textContent = error.message; }
+});
+document.addEventListener("submit", async (event) => {
+  if (event.target.id !== "targetForm") return;
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.target).entries());
+  try {
+    await api("/api/targets", { method: "POST", body: JSON.stringify(payload) });
+    await refresh();
+    notify("Long-term learner target created");
+  } catch (error) { notify(error.message); }
+});
+
 $("newForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   $("createError").textContent = "";
@@ -402,6 +468,10 @@ $("newForm").addEventListener("submit", async (event) => {
   const data = Object.fromEntries(form.entries());
   data.feedback_required = $("newForm").elements.feedback_required.checked;
   data.teams_recorded_confirmed = $("newForm").elements.teams_recorded_confirmed.checked;
+  if (!data.criterion_id) delete data.criterion_id;
+  else data.criterion_id = Number(data.criterion_id);
+  if (!data.target_id) delete data.target_id;
+  else data.target_id = Number(data.target_id);
   try {
     await api("/api/threads", { method: "POST", body: JSON.stringify(data) });
     $("newDialog").close();

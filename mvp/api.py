@@ -57,13 +57,88 @@ class Assignment(Base):
     __tablename__ = "mvp_assignments"
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     title: Mapped[str] = mapped_column(String(120))
+
     module: Mapped[str] = mapped_column(String(100))
+
+
+class Course(Base):
+    __tablename__ = "mvp_courses"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    title: Mapped[str] = mapped_column(String(120))
+
+
+class Cohort(Base):
+    __tablename__ = "mvp_cohorts"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    course_id: Mapped[str] = mapped_column(ForeignKey("mvp_courses.id"))
+    name: Mapped[str] = mapped_column(String(120))
+    academic_year: Mapped[str] = mapped_column(String(20))
+
+
+class Enrollment(Base):
+    __tablename__ = "mvp_enrolments"
+    __table_args__ = (UniqueConstraint("cohort_id", "user_id", name="uq_mvp_enrolment"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cohort_id: Mapped[str] = mapped_column(ForeignKey("mvp_cohorts.id"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("mvp_users.id"))
+    member_role: Mapped[str] = mapped_column(String(20))
+
+
+class CohortAssignment(Base):
+    __tablename__ = "mvp_cohort_assignments"
+    __table_args__ = (UniqueConstraint("cohort_id", "assignment_id", name="uq_mvp_cohort_assignment"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cohort_id: Mapped[str] = mapped_column(ForeignKey("mvp_cohorts.id"))
+    assignment_id: Mapped[str] = mapped_column(ForeignKey("mvp_assignments.id"))
+
+
+class Criterion(Base):
+    __tablename__ = "mvp_criteria"
+    __table_args__ = (UniqueConstraint("assignment_id", "code", name="uq_mvp_assignment_criterion"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    assignment_id: Mapped[str] = mapped_column(ForeignKey("mvp_assignments.id"))
+    code: Mapped[str] = mapped_column(String(30))
+    description: Mapped[str] = mapped_column(String(300))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ImprovementTarget(Base):
+    __tablename__ = "mvp_improvement_targets"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cohort_id: Mapped[str] = mapped_column(ForeignKey("mvp_cohorts.id"))
+    learner_id: Mapped[str] = mapped_column(ForeignKey("mvp_users.id"))
+    tutor_id: Mapped[str] = mapped_column(ForeignKey("mvp_users.id"))
+    title: Mapped[str] = mapped_column(String(140))
+    guidance: Mapped[str] = mapped_column(String(1000), default="")
+    status: Mapped[str] = mapped_column(String(16), default="OPEN")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    achieved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class TargetLink(Base):
+    __tablename__ = "mvp_target_links"
+    __table_args__ = (UniqueConstraint("target_id", "feedback_id", name="uq_mvp_target_feedback"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    target_id: Mapped[int] = mapped_column(ForeignKey("mvp_improvement_targets.id"))
+    feedback_id: Mapped[int] = mapped_column(ForeignKey("mvp_feedback.id"))
+
+
+class TargetReview(Base):
+    __tablename__ = "mvp_target_reviews"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    target_id: Mapped[int] = mapped_column(ForeignKey("mvp_improvement_targets.id"))
+    tutor_id: Mapped[str] = mapped_column(ForeignKey("mvp_users.id"))
+    status: Mapped[str] = mapped_column(String(16))
+    reason: Mapped[str] = mapped_column(String(1000))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class Feedback(Base):
     __tablename__ = "mvp_feedback"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     assignment_id: Mapped[str] = mapped_column(ForeignKey("mvp_assignments.id"))
+    cohort_id: Mapped[str | None] = mapped_column(ForeignKey("mvp_cohorts.id"), nullable=True)
+    criterion_id: Mapped[int | None] = mapped_column(ForeignKey("mvp_criteria.id"), nullable=True)
     learner_id: Mapped[str] = mapped_column(ForeignKey("mvp_users.id"))
     tutor_id: Mapped[str] = mapped_column(ForeignKey("mvp_users.id"))
     criterion: Mapped[str] = mapped_column(String(160), default="")
@@ -157,6 +232,9 @@ def check_evidence(name: str, content: bytes) -> tuple[str, str]:
 class NewFeedback(BaseModel):
     assignment_id: str
     learner_id: str
+    cohort_id: str | None = None
+    criterion_id: int | None = Field(default=None, gt=0)
+    target_id: int | None = Field(default=None, gt=0)
     criterion: str = Field(default="", max_length=160)
     feedback_text: str = Field(min_length=1, max_length=4000)
     next_step: str = Field(default="", max_length=2000)
@@ -169,6 +247,29 @@ class NewFeedback(BaseModel):
     feedback_required: bool = True
 
 
+
+class NewCriterion(BaseModel):
+    cohort_id: str
+    code: str = Field(min_length=1, max_length=30)
+    description: str = Field(min_length=1, max_length=300)
+
+
+class NewTarget(BaseModel):
+    cohort_id: str
+    learner_id: str
+    title: str = Field(min_length=4, max_length=140)
+    guidance: str = Field(default="", max_length=1000)
+
+
+class TargetLinkRequest(BaseModel):
+    feedback_id: int = Field(gt=0)
+
+
+class TargetDecision(BaseModel):
+    status: Literal["OPEN", "ACHIEVED"]
+    reason: str = Field(min_length=15, max_length=1000)
+
+
 class StatusChange(BaseModel):
     status: Literal["ACTION_REQUIRED", "IN_PROGRESS", "READY_FOR_REVIEW", "CLOSED"]
     progress_note: str = Field(default="", max_length=2000)
@@ -176,6 +277,33 @@ class StatusChange(BaseModel):
 
 class NewComment(BaseModel):
     body: str = Field(min_length=1, max_length=2000)
+
+
+
+def cohort_ids(db: Session, user: User) -> set[str]:
+    if user.role not in ("learner", "tutor"):
+        return set()
+    return set(db.scalars(select(Enrollment.cohort_id).where(
+        Enrollment.user_id == user.id, Enrollment.member_role == user.role)).all())
+
+
+def eligible_cohorts(db: Session, assignment_id: str, tutor_id: str, learner_id: str) -> set[str]:
+    mapped = set(db.scalars(select(CohortAssignment.cohort_id).where(
+        CohortAssignment.assignment_id == assignment_id)).all())
+    staff = set(db.scalars(select(Enrollment.cohort_id).where(
+        Enrollment.user_id == tutor_id, Enrollment.member_role == "tutor")).all())
+    students = set(db.scalars(select(Enrollment.cohort_id).where(
+        Enrollment.user_id == learner_id, Enrollment.member_role == "learner")).all())
+    return mapped & staff & students
+
+
+def is_authorised_assignment(db: Session, assignment_id: str, actor: User, cohort_id: str) -> bool:
+    return (
+        cohort_id in cohort_ids(db, actor)
+        and db.scalar(select(CohortAssignment.id).where(
+            CohortAssignment.cohort_id == cohort_id,
+            CohortAssignment.assignment_id == assignment_id)) is not None
+    )
 
 
 def seed_demo(db: Session) -> None:
@@ -186,9 +314,29 @@ def seed_demo(db: Session) -> None:
         User(id="learner-1", name="Alex Taylor", role="learner"),
         User(id="learner-2", name="Morgan Ellis", role="learner"),
         User(id="admin-1", name="Quality Team", role="admin"),
+        User(id="tutor-2", name="Sam Patel", role="tutor"),
+        User(id="learner-3", name="Jamie Reed", role="learner"),
+        Course(id="computing", title="Computing"),
+        Cohort(id="computing-26", course_id="computing", name="Computing Pilot A", academic_year="2026/27"),
+        Cohort(id="web-26", course_id="computing", name="Computing Pilot B", academic_year="2026/27"),
         Assignment(id="java", title="Java Library System", module="Programming"),
         Assignment(id="database", title="Database Design", module="Databases"),
         Assignment(id="web", title="Accessible Portfolio", module="Web Development"),
+    ])
+    db.flush()
+    db.add_all([
+        Enrollment(cohort_id="computing-26", user_id="tutor-1", member_role="tutor"),
+        Enrollment(cohort_id="computing-26", user_id="learner-1", member_role="learner"),
+        Enrollment(cohort_id="computing-26", user_id="learner-2", member_role="learner"),
+        Enrollment(cohort_id="web-26", user_id="tutor-2", member_role="tutor"),
+        Enrollment(cohort_id="web-26", user_id="learner-3", member_role="learner"),
+        *(CohortAssignment(cohort_id="computing-26", assignment_id=a)
+          for a in ("java", "database", "web")),
+        CohortAssignment(cohort_id="web-26", assignment_id="web"),
+        Criterion(assignment_id="java", code="LO2", description="Use abstraction and encapsulation"),
+        Criterion(assignment_id="java", code="LO3", description="Implement automated tests"),
+        Criterion(assignment_id="database", code="LO1", description="Design and normalise a relational model"),
+        Criterion(assignment_id="web", code="LO3", description="Apply accessible interface principles"),
     ])
     db.flush()
     samples = [
@@ -199,9 +347,10 @@ def seed_demo(db: Session) -> None:
         ("database", "learner-2", "LO1 · Normalisation", "Your functional dependencies are clear. Continue checking for transitive dependencies.", "Review the tables for third normal form.", "Data modelling", CLOSED, True),
         ("web", "learner-2", "LO1 · Structure", "You have made a confident start and organised the pages well.", "", "", INFORMATION, False),
     ]
+    seeded_threads = {}
     for a, learner, criterion, words, step, tag, status, required in samples:
         thread = Feedback(
-            assignment_id=a, learner_id=learner, tutor_id="tutor-1", criterion=criterion,
+            assignment_id=a, cohort_id="computing-26", learner_id=learner, tutor_id="tutor-1", criterion=criterion,
             feedback_text=words, next_step=step, focus_tag=tag,
             teams_reference="Teams demo assignment " + a,
             status=status, feedback_required=required,
@@ -209,10 +358,22 @@ def seed_demo(db: Session) -> None:
         )
         db.add(thread)
         db.flush()
+        seeded_threads[(learner, a)] = thread.id
         db.add(TeamsHandoff(
             feedback_id=thread.id, learner_id=learner,
             teams_reference="Teams demo assignment " + a, confirmed_by="tutor-1",
         ))
+    sample_target = ImprovementTarget(
+        cohort_id="computing-26", learner_id="learner-1", tutor_id="tutor-1",
+        title="Explain and test design decisions",
+        guidance="When responding to feedback, explain why your change works and demonstrate how you checked it.",
+    )
+    db.add(sample_target)
+    db.flush()
+    db.add_all([
+        TargetLink(target_id=sample_target.id, feedback_id=seeded_threads[("learner-1", "java")]),
+        TargetLink(target_id=sample_target.id, feedback_id=seeded_threads[("learner-1", "web")]),
+    ])
     db.commit()
 
 
@@ -279,6 +440,8 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             raise HTTPException(404, "Feedback not found.")
         if person.role == "admin":
             raise HTTPException(403, "Admin reports are aggregate only.")
+        if thread.cohort_id not in cohort_ids(db, person):
+            raise HTTPException(404, "Feedback not found.")
         return thread
 
     def summarise(db: Session, thread: Feedback) -> dict:
@@ -287,7 +450,10 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         return {
             "id": thread.id, "assignment": assignment.title, "module": assignment.module,
             "learner": learner.name, "learner_id": thread.learner_id,
-            "criterion": thread.criterion, "feedback_text": thread.feedback_text,
+            "criterion": thread.criterion, "criterion_id": thread.criterion_id,
+            "cohort_id": thread.cohort_id,
+            "cohort_name": db.get(Cohort, thread.cohort_id).name if thread.cohort_id else None,
+            "feedback_text": thread.feedback_text,
             "next_step": thread.next_step, "focus_tag": thread.focus_tag,
             "teams_reference": thread.teams_reference, "feedback_required": thread.feedback_required,
             "status": thread.status, "updated_at": stamp(thread.updated_at), "closed_at": stamp(thread.closed_at),
@@ -315,19 +481,202 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         return {
             "auth_mode": mode, "csrf_token": request.session.get("csrf") if entra_config else None,
             "user": {"id": person.id, "name": person.name, "role": person.role},
-            "assignments": [{"id": a.id, "title": a.title, "module": a.module}
-                            for a in db.scalars(select(Assignment)).all()] if person.role == "tutor" else [],
-            "learners": [{"id": u.id, "name": u.name}
-                         for u in db.scalars(select(User).where(User.role == "learner")).all()]
-                         if person.role == "tutor" else [],
+            "cohorts": [
+                {"id": c.id, "name": c.name, "academic_year": c.academic_year,
+                 "course": db.get(Course, c.course_id).title}
+                for c in db.scalars(select(Cohort).where(Cohort.id.in_(cohort_ids(db, person)))).all()
+            ] if person.role != "admin" else [],
+            "assignments": [
+                {"id": a.id, "title": a.title, "module": a.module, "cohort_id": m.cohort_id}
+                for m in db.scalars(select(CohortAssignment).where(
+                    CohortAssignment.cohort_id.in_(cohort_ids(db, person)))).all()
+                if (a := db.get(Assignment, m.assignment_id)) is not None
+            ] if person.role == "tutor" else [],
+            "learners": [
+                {"id": u.id, "name": u.name, "cohort_id": e.cohort_id}
+                for e in db.scalars(select(Enrollment).where(
+                    Enrollment.cohort_id.in_(cohort_ids(db, person)),
+                    Enrollment.member_role == "learner")).all()
+                if (u := db.get(User, e.user_id)) is not None
+            ] if person.role == "tutor" else [],
+            "criteria": [
+                {"id": c.id, "assignment_id": c.assignment_id, "code": c.code,
+                 "description": c.description}
+                for c in db.scalars(select(Criterion).where(
+                    Criterion.assignment_id.in_(
+                        select(CohortAssignment.assignment_id).where(
+                            CohortAssignment.cohort_id.in_(cohort_ids(db, person)))))).all()
+            ] if person.role == "tutor" else [],
         }
+
+
+    @app.get("/api/cohorts")
+    def list_cohorts(person: User = Depends(actor), db: Session = Depends(database)):
+        """Only approved cohort memberships are visible; never enumerate the whole College."""
+        if person.role not in ("tutor", "learner"):
+            raise HTTPException(403, "Cohort membership required.")
+        records = db.scalars(select(Cohort).where(Cohort.id.in_(cohort_ids(db, person)))).all()
+        return [{
+            "id": c.id, "name": c.name,
+            "course": db.get(Course, c.course_id).title,
+            "academic_year": c.academic_year,
+            "learners": [
+                {"id": student.id, "name": student.name}
+                for e in db.scalars(select(Enrollment).where(
+                    Enrollment.cohort_id == c.id,
+                    Enrollment.member_role == "learner")).all()
+                if (student := db.get(User, e.user_id)) is not None
+            ] if person.role == "tutor" else None,
+        } for c in records]
+
+    @app.get("/api/assignments/{assignment_id}/criteria")
+    def list_criteria(assignment_id: str, cohort_id: str, person: User = Depends(actor),
+                      db: Session = Depends(database)):
+        if not is_authorised_assignment(db, assignment_id, person, cohort_id):
+            raise HTTPException(404, "Assignment not found.")
+        criteria = db.scalars(select(Criterion).where(
+            Criterion.assignment_id == assignment_id).order_by(Criterion.sort_order, Criterion.id)).all()
+        return [{"id": c.id, "code": c.code, "description": c.description} for c in criteria]
+
+    @app.post("/api/assignments/{assignment_id}/criteria", status_code=201)
+    def create_criterion(assignment_id: str, payload: NewCriterion,
+                         person: User = Depends(actor), db: Session = Depends(database)):
+        if person.role != "tutor" or not is_authorised_assignment(db, assignment_id, person, payload.cohort_id):
+            raise HTTPException(403, "Assigned tutor required.")
+        if not payload.code.strip() or not payload.description.strip():
+            raise HTTPException(422, "Criterion code and description are required.")
+        criterion = Criterion(assignment_id=assignment_id, code=payload.code.strip().upper(),
+                              description=payload.description.strip())
+        db.add(criterion)
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(409, "Criterion already exists for this assignment.") from exc
+        db.refresh(criterion)
+        return {"id": criterion.id, "assignment_id": assignment_id,
+                "code": criterion.code, "description": criterion.description}
+
+    def get_target(db: Session, person: User, target_id: int) -> ImprovementTarget:
+        target = db.get(ImprovementTarget, target_id)
+        if not target or target.cohort_id not in cohort_ids(db, person):
+            raise HTTPException(404, "Target not found.")
+        if person.role == "learner" and target.learner_id != person.id:
+            raise HTTPException(404, "Target not found.")
+        if person.role == "tutor" and target.tutor_id != person.id:
+            raise HTTPException(404, "Target not found.")
+        if person.role not in ("tutor", "learner"):
+            raise HTTPException(403, "Not authorised.")
+        return target
+
+    def target_payload(db: Session, target: ImprovementTarget) -> dict:
+        links = db.scalars(select(TargetLink).where(
+            TargetLink.target_id == target.id).order_by(TargetLink.id)).all()
+        threads = [db.get(Feedback, l.feedback_id) for l in links]
+        reviews = db.scalars(select(TargetReview).where(
+            TargetReview.target_id == target.id).order_by(TargetReview.id)).all()
+        return {
+            "id": target.id, "title": target.title, "guidance": target.guidance,
+            "status": target.status, "cohort_id": target.cohort_id,
+            "learner_id": target.learner_id, "learner": db.get(User, target.learner_id).name,
+            "tutor_id": target.tutor_id, "created_at": stamp(target.created_at),
+            "achieved_at": stamp(target.achieved_at),
+            "linked_feedback": [
+                {"feedback_id": t.id, "assignment": db.get(Assignment, t.assignment_id).title,
+                 "assignment_id": t.assignment_id, "status": t.status}
+                for t in threads if t
+            ],
+            "history": [
+                {"status": v.status, "reason": v.reason,
+                 "at": stamp(v.created_at), "tutor": db.get(User, v.tutor_id).name}
+                for v in reviews
+            ],
+            "can_achieve": any(t is not None and t.status == CLOSED for t in threads),
+        }
+
+    @app.get("/api/targets")
+    def list_targets(person: User = Depends(actor), db: Session = Depends(database)):
+        if person.role not in ("tutor", "learner"):
+            raise HTTPException(403, "Targets belong to tutors and learners.")
+        condition = (ImprovementTarget.tutor_id == person.id if person.role == "tutor"
+                     else ImprovementTarget.learner_id == person.id)
+        results = db.scalars(select(ImprovementTarget).where(
+            condition, ImprovementTarget.cohort_id.in_(cohort_ids(db, person))
+        ).order_by(ImprovementTarget.created_at.desc())).all()
+        return [target_payload(db, t) for t in results]
+
+    @app.get("/api/targets/{target_id}")
+    def target_detail(target_id: int, person: User = Depends(actor), db: Session = Depends(database)):
+        return target_payload(db, get_target(db, person, target_id))
+
+    @app.post("/api/targets", status_code=201)
+    def create_target(payload: NewTarget, person: User = Depends(actor),
+                      db: Session = Depends(database)):
+        if person.role != "tutor" or payload.cohort_id not in cohort_ids(db, person):
+            raise HTTPException(403, "Assigned tutor required.")
+        learner = db.get(User, payload.learner_id)
+        if not learner or learner.role != "learner" or payload.cohort_id not in cohort_ids(db, learner):
+            raise HTTPException(403, "Learner is not enrolled in the tutor's cohort.")
+        if not payload.title.strip() or not payload.guidance.strip():
+            raise HTTPException(422, "Title and tutor-authored guidance are required.")
+        target = ImprovementTarget(
+            cohort_id=payload.cohort_id, learner_id=learner.id, tutor_id=person.id,
+            title=payload.title.strip(), guidance=payload.guidance.strip(),
+        )
+        db.add(target)
+        db.commit()
+        return target_payload(db, target)
+
+    @app.post("/api/targets/{target_id}/links", status_code=201)
+    def link_target(target_id: int, payload: TargetLinkRequest,
+                    person: User = Depends(actor), db: Session = Depends(database)):
+        if person.role != "tutor":
+            raise HTTPException(403, "Tutors link feedback to targets.")
+        target = get_target(db, person, target_id)
+        feedback = accessible(db, person, payload.feedback_id)
+        if target.status != "OPEN" or feedback.learner_id != target.learner_id or feedback.cohort_id != target.cohort_id:
+            raise HTTPException(403, "Feedback must belong to the target's learner and cohort.")
+        db.add(TargetLink(target_id=target.id, feedback_id=feedback.id))
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(409, "Feedback is already linked to this target.") from exc
+        return target_payload(db, target)
+
+    @app.post("/api/targets/{target_id}/status")
+    def review_target(target_id: int, payload: TargetDecision,
+                      person: User = Depends(actor), db: Session = Depends(database)):
+        if person.role != "tutor":
+            raise HTTPException(403, "Only a tutor can confirm target achievement.")
+        target = get_target(db, person, target_id)
+        if target.status == payload.status:
+            raise HTTPException(409, "Target is already in that state.")
+        if not payload.reason.strip() or len(payload.reason.strip()) < 15:
+            raise HTTPException(422, "Explain the professional judgement in at least 15 characters.")
+        if payload.status == "ACHIEVED":
+            linked_ids = select(TargetLink.feedback_id).where(TargetLink.target_id == target.id)
+            completed = db.scalar(select(Feedback.id).where(
+                Feedback.id.in_(linked_ids), Feedback.status == CLOSED,
+                Feedback.cohort_id == target.cohort_id, Feedback.learner_id == target.learner_id
+            ).limit(1))
+            if completed is None:
+                raise HTTPException(409, "Close at least one linked feedback action before marking achieved.")
+        target.status = payload.status
+        target.achieved_at = utcnow() if payload.status == "ACHIEVED" else None
+        db.add(TargetReview(target_id=target.id, tutor_id=person.id,
+                            status=payload.status, reason=payload.reason.strip()))
+        db.commit()
+        return target_payload(db, target)
 
     @app.get("/api/threads")
     def list_threads(person: User = Depends(actor), db: Session = Depends(database)):
         if person.role == "admin":
             raise HTTPException(403, "Use aggregate reports.")
         condition = Feedback.learner_id == person.id if person.role == "learner" else Feedback.tutor_id == person.id
-        threads = db.scalars(select(Feedback).where(condition).order_by(Feedback.updated_at.desc())).all()
+        threads = db.scalars(select(Feedback).where(
+            condition, Feedback.cohort_id.in_(cohort_ids(db, person))
+        ).order_by(Feedback.updated_at.desc())).all()
         return [summarise(db, t) for t in threads]
 
     @app.get("/api/threads/{fid}")
@@ -356,6 +705,27 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         learner = db.get(User, payload.learner_id)
         if learner is None or learner.role != "learner" or db.get(Assignment, payload.assignment_id) is None:
             raise HTTPException(422, "Choose a valid learner and assignment.")
+        permitted = eligible_cohorts(db, payload.assignment_id, person.id, learner.id)
+        if not permitted:
+            raise HTTPException(403, "Tutor and learner must share the assigned cohort.")
+        if payload.cohort_id:
+            if payload.cohort_id not in permitted:
+                raise HTTPException(403, "Assignment is not shared in the selected cohort.")
+            selected_cohort = payload.cohort_id
+        elif len(permitted) == 1:
+            selected_cohort = next(iter(permitted))
+        else:
+            raise HTTPException(422, "Choose the cohort for this feedback.")
+        criterion = None
+        if payload.criterion_id is not None:
+            criterion = db.get(Criterion, payload.criterion_id)
+            if criterion is None or criterion.assignment_id != payload.assignment_id:
+                raise HTTPException(422, "Assessment criterion does not belong to the assignment.")
+        target = None
+        if payload.target_id is not None:
+            target = db.get(ImprovementTarget, payload.target_id)
+            if not target or target.status != "OPEN" or target.cohort_id != selected_cohort or target.learner_id != learner.id or target.tutor_id != person.id:
+                raise HTTPException(403, "Target is not accessible for this learner and cohort.")
         if not payload.feedback_text.strip() or (payload.feedback_required and not payload.next_step.strip()):
             raise HTTPException(422, "Feedback text and, when required, an actionable next step are needed.")
         if not payload.teams_recorded_confirmed:
@@ -373,8 +743,11 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             if existing:
                 raise HTTPException(409, "This Teams learner submission has an existing feedback loop.")
         thread = Feedback(
-            assignment_id=payload.assignment_id, learner_id=learner.id, tutor_id=person.id,
-            criterion=payload.criterion.strip(), feedback_text=payload.feedback_text.strip(),
+            assignment_id=payload.assignment_id, cohort_id=selected_cohort,
+            criterion_id=criterion.id if criterion else None,
+            learner_id=learner.id, tutor_id=person.id,
+            criterion=f"{criterion.code} · {criterion.description}" if criterion else payload.criterion.strip(),
+            feedback_text=payload.feedback_text.strip(),
             next_step=payload.next_step.strip(), focus_tag=payload.focus_tag.strip(),
             teams_reference=payload.teams_reference.strip(), feedback_required=payload.feedback_required,
             status=ACTION_REQUIRED if payload.feedback_required else INFORMATION,
@@ -389,6 +762,8 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             teams_submission_id=teams_ids[2] or None,
             confirmed_by=person.id,
         ))
+        if target is not None:
+            db.add(TargetLink(target_id=target.id, feedback_id=thread.id))
         db.add(Event(feedback_id=thread.id, actor_id=person.id,
                      description="Tutor confirmed initial feedback in Teams and shared an action"))
         try:
@@ -484,18 +859,21 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
     def tutor_focus(person: User = Depends(actor), db: Session = Depends(database)):
         if person.role != "tutor":
             raise HTTPException(403, "Tutor role required.")
-        threads = db.scalars(select(Feedback).where(Feedback.tutor_id == person.id)).all()
+        threads = db.scalars(select(Feedback).where(
+            Feedback.tutor_id == person.id,
+            Feedback.cohort_id.in_(cohort_ids(db, person)))).all()
         grouped = defaultdict(list)
         for t in threads:
             if t.focus_tag.strip():
-                grouped[(t.learner_id, t.focus_tag.strip().casefold())].append(t)
+                grouped[(t.cohort_id, t.learner_id, t.focus_tag.strip().casefold())].append(t)
         recurring = []
-        for (learner_id, _), items in grouped.items():
+        for (group_cohort_id, learner_id, _), items in grouped.items():
             if len({t.assignment_id for t in items}) < 2:
                 continue
             learner = db.get(User, learner_id)
             recurring.append({
                 "learner": learner.name, "learner_id": learner_id,
+                "cohort_id": group_cohort_id,
                 "focus": items[0].focus_tag, "feedback_count": len(items),
                 "assignment_count": len({t.assignment_id for t in items}),
                 "threads": [{"feedback_id": t.id, "assignment": db.get(Assignment, t.assignment_id).title}

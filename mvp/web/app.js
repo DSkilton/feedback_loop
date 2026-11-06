@@ -420,6 +420,35 @@ document.addEventListener("click", async (event) => {
     } catch (error) { notify(error.message); }
     return;
   }
+  const targetReview = event.target.closest("[data-target-status]");
+  if (targetReview) {
+    const tid = targetReview.dataset.targetId;
+    const reason = document.querySelector('[data-target-reason="' + tid + '"]')?.value.trim() || "";
+    if (reason.length < 15) { notify("Explain your teacher review decision in at least 15 characters."); return; }
+    try {
+      await api("/api/targets/" + tid + "/status", {
+        method: "POST",
+        body: JSON.stringify({ status: targetReview.dataset.targetStatus, reason }),
+      });
+      await refresh();
+      notify("Tutor target decision recorded");
+    } catch (error) { notify(error.message); }
+    return;
+  }
+  const targetLink = event.target.closest("[data-target-link]");
+  if (targetLink) {
+    const tid = targetLink.dataset.targetLink;
+    const chosen = document.querySelector('[data-link-select="' + tid + '"]')?.value;
+    if (!chosen) { notify("Choose a feedback action to link."); return; }
+    try {
+      await api("/api/targets/" + tid + "/links", {
+        method: "POST", body: JSON.stringify({ feedback_id: Number(chosen) }),
+      });
+      await refresh();
+      notify("Feedback linked to the long-term target");
+    } catch (error) { notify(error.message); }
+    return;
+  }
   const status = event.target.closest("[data-status]");
   if (status) { await changeStatus(status.dataset.id, status.dataset.status); return; }
 });

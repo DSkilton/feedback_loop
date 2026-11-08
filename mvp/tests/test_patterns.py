@@ -102,7 +102,8 @@ def test_observer_audit_and_report_counters_share_one_commit(system):
     report = client.get("/api/reports").json()
     assert report["total"] == 6
     assert report["closed"] == 2
-    assert report["awaiting_review"] == 0
+    # Seeded feedback #3 remains ready for review; #1 was approved and closed.
+    assert report["awaiting_review"] == 1
     assert report["actions_required"] == 5
     # The read model agrees with authoritative feedback, but a GET does not scan it.
     projection = {

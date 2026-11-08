@@ -44,6 +44,18 @@ python -m pytest -q mvp/tests
 node --check mvp/web/app.js
 ~~~
 
+## Architecture and design patterns
+
+See **[State Machine, Observer and CQRS-style read models](docs/design-patterns.md)** for the diagram, transition table and SOLID rationale.
+
+- `mvp/workflow.py` centrally controls valid learner/tutor state transitions. Only a tutor may close feedback.
+- `mvp/events.py` publishes typed changes to independent, synchronous audit and reporting observers.
+- `mvp/reporting.py` maintains aggregate counters in the same database transaction; the QA dashboard reads counters without scanning individual feedback each time.
+- `mvp_domain_events` records structured workflow provenance, including explicit tutor approval of closure.
+- These improvements retain the existing browser interface and do **not** introduce full event sourcing, external messaging or automatic feedback writing.
+
+The new `mvp_report_counters` and `mvp_domain_events` tables are created automatically for a local demo; an existing synthetic demo database is backfilled once. Schema migrations and concurrency/security review are still required for any production deployment.
+
 Read [College integration and release gates](docs/college-integration.md) before attempting any Entra ID configuration. **Sign-in is disabled by default;** Entra requires approved tenant configuration, app roles and an offline mapping to already-enrolled local users. That login scaffold has not been tested against the live College tenant.
 
 The previous teaching prototype remains on branch \`archive/teaching-prototype-2025\`, with its source still on the original \`master\` until this work is reviewed.

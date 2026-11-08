@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from sqlalchemy import Integer, String, delete, func, select
+from sqlalchemy import Integer, String, delete, func, select, update
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from .base import Base
@@ -24,15 +24,23 @@ class ReportCounter(Base):
 
 
 def _adjust(db: Session, key: str, change: int) -> None:
-    metric = db.get(ReportCounter, key)
-    if metric is None:
+    """Use an atomic SQL update to avoid lost counter increments in parallel writes.
+
+    This is still an MVP, not a concurrency or multi-tenant production guarantee.
+    """
+    db.flush()  # Materialise newly-added counters if another event runs in this transaction.
+    statement = update(ReportCounter).where(ReportCounter.key == key)
+    if change < 0:
+        statement = statement.where(ReportCounter.value >= -change)
+    result = db.execute(
+        statement.values(value=ReportCounter.value + change),
+        execution_options={"synchronize_session": False},
+    )
+    if result.rowcount == 0:
         if change < 0:
             raise RuntimeError(f"Report projection out of sync: {key}")
         db.add(ReportCounter(key=key, value=change))
-    else:
-        if metric.value + change < 0:
-            raise RuntimeError(f"Report projection out of sync: {key}")
-        metric.value += change
+        db.flush()
 
 
 class ReportProjectionObserver:

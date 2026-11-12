@@ -6,6 +6,8 @@ Quality reports use precomputed `mvp_report_counters` rather than scanning feedb
 
 Reconciliation is **on demand**, not part of `GET /api/reports`. The normal dashboard remains fast and read-only.
 
+Quality administrators can select **Check report totals** on the reporting dashboard to run an audited check and see discrepancies. Repairs are deliberately **not** offered as a dashboard button; they remain a separately authorised maintenance operation.
+
 ## Endpoints
 
 | Operation | Request | Permission | Effect |

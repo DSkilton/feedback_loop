@@ -10,12 +10,11 @@ import hashlib
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, func, select
+from sqlalchemy import Boolean, DateTime, Integer, String, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from .base import Base
 from .reporting import AggregateReportReadModel, ReportCounter
-from .workflow import STATES
 
 
 class ReportMaintenanceAudit(Base):
@@ -44,22 +43,7 @@ class ReportReconciliationService:
         self._read_model = read_model or AggregateReportReadModel()
 
     def expected(self, db: Session, feedback_model: type) -> dict[str, int]:
-        total = db.scalar(select(func.count()).select_from(feedback_model)) or 0
-        actions = db.scalar(select(func.count()).select_from(feedback_model).where(
-            feedback_model.feedback_required.is_(True))) or 0
-        state_rows = db.execute(
-            select(feedback_model.status, func.count()).group_by(feedback_model.status)).all()
-        tag_rows = db.execute(
-            select(feedback_model.focus_tag, func.count())
-            .where(feedback_model.focus_tag.is_not(None), feedback_model.focus_tag != "")
-            .group_by(feedback_model.focus_tag)).all()
-        expected = {"total": total, "actions_required": actions}
-        expected.update({f"status:{state}": 0 for state in STATES})
-        for state, count in state_rows:
-            expected[f"status:{state}"] = count
-        for tag, count in tag_rows:
-            expected[f"focus:{tag}"] = count
-        return expected
+        return self._read_model.expected_counters(db, feedback_model)
 
     def observed(self, db: Session) -> dict[str, int]:
         return dict(db.execute(select(ReportCounter.key, ReportCounter.value)).all())

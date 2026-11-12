@@ -16,7 +16,7 @@ The prototype provides:
 - Separate **aggregate QA reporting** dashboard.
 - A manually recorded Teams reference for initial assessment feedback.
 
-> **Safety: local synthetic-data demo only.** Identity switching in the prototype is not secure authentication. Do not publish the app, connect it to real learner accounts, or upload student work. Production requires College approval and Microsoft Entra ID security integration.
+> The local identity switch is a development tool. Keep the demo server bound to `127.0.0.1`.
 
 ### Run the MVP locally
 
@@ -37,4 +37,4 @@ PowerShell and full developer instructions are in [mvp/README.md](mvp/README.md)
 
 ### Development roadmap
 
-Follow the [issues](https://github.com/DSkilton/feedback_loop/issues) for Microsoft Teams/Entra integration, safeguarding/privacy decisions, teacher and learner co-design, accessible UI improvements and production reporting. Feedback Loop is **not ready for a College deployment**.
+Follow the [issues](https://github.com/DSkilton/feedback_loop/issues) for Microsoft integration, learner and tutor co-design, accessible UI improvements, reporting and deployment work.

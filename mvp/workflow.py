@@ -26,6 +26,7 @@ TUTOR_TRANSITIONS = frozenset({
     (INFORMATION, CLOSED),
     (READY_FOR_REVIEW, IN_PROGRESS),
     (CLOSED, ACTION_REQUIRED),
+    (CLOSED, INFORMATION),
     # Tutor-directed guidance, with no implicit approval.
     (ACTION_REQUIRED, IN_PROGRESS),
     (IN_PROGRESS, READY_FOR_REVIEW),
@@ -60,6 +61,10 @@ class FeedbackStateMachine:
             if target == READY_FOR_REVIEW and not note:
                 raise TransitionRejected(422, "Explain what you changed before requesting review.")
         elif actor_role == "tutor":
+            if current == CLOSED and target in (ACTION_REQUIRED, INFORMATION):
+                correct_state = ACTION_REQUIRED if feedback_required else INFORMATION
+                if target != correct_state:
+                    raise TransitionRejected(409, "Reopen feedback in its original action category.")
             if (current, target) not in TUTOR_TRANSITIONS:
                 raise TransitionRejected(409, "That tutor transition is not permitted.")
         else:

@@ -189,7 +189,7 @@ function actionButtons(thread) {
   } else {
     if (thread.status === "READY_FOR_REVIEW") targetLabels.push(["CLOSED", "✓ Close feedback loop"], ["IN_PROGRESS", "Return for further work"]);
     if (thread.status === "INFORMATION") targetLabels.push(["CLOSED", "Mark as reviewed"]);
-    if (thread.status === "CLOSED") targetLabels.push(["ACTION_REQUIRED", "Reopen feedback"]);
+    if (thread.status === "CLOSED") targetLabels.push([thread.feedback_required ? "ACTION_REQUIRED" : "INFORMATION", "Reopen feedback"]);
   }
   return targetLabels.map(([key, label]) => '<button type="button" class="' + (key === "CLOSED" ? "button-primary" : "button-ghost") +
     '" data-status="' + key + '" data-id="' + thread.id + '">' + escapeHtml(label) + '</button>').join("");

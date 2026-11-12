@@ -105,7 +105,7 @@ explicit recovery tool when counters need repair (run during a controlled
 maintenance window, in a transaction). The QA endpoint **never** rebuilds
 the projection per request.
 
-## SOLID and privacy boundaries
+## SOLID and access boundaries
 
 - **Single Responsibility:** state-machine transitions, observer delivery,
   audit persistence and report queries have different jobs.

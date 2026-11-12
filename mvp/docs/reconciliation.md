@@ -65,7 +65,7 @@ No student feedback text or evidence files are loaded, returned or copied to thi
 - The reconciliation service calls `AggregateReportReadModel.expected_counters()`, the **same aggregate calculator** used for a rebuild, rather than maintaining a duplicate set of SQL expressions.
 - Neither check nor repair is exposed to learners or tutors.
 - The normal report endpoint never invokes the reconciler.
-- The startup code still performs the existing one-off report projection bootstrap if the `total` counter is absent. Treat startup bootstrap separately from operator-initiated reconciliation.
+- The startup code bootstraps reporting **once**, tracked by `mvp_report_projection_state`. Missing counters after initialisation remain missing across restarts, so they can be detected and repaired explicitly rather than silently overwritten.
 - Concurrency with live feedback writes during a repair is not yet fully coordinated. Run the operator repair during a quiet/maintenance period. Issue #21 covers optimistic concurrency on feedback commands; a production implementation will also need an appropriate reconciliation/write lock strategy.
 - Schema changes still need versioned migrations and regular backups; this feature does not replace them.
 

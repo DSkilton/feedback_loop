@@ -2,7 +2,7 @@
 
 A **teacher-led** platform for closing the feedback loop. The learner and tutor interface is a responsive Kanban board; the quality-assurance interface is a separate aggregate reporting dashboard.
 
-**Never use this demo with real student data.** The current authentication deliberately uses switchable synthetic identities. It is NOT secure authentication and must never be deployed to the College network or exposed on a public IP. College IT approval, Microsoft Entra ID integration, role mapping, data-protection review, accessibility testing and production database migrations are required first.
+**Developer setup:** The identity switch is available in local mode and is not production authentication. Keep local mode bound to `127.0.0.1`; an Entra ID adapter is available for a separately configured deployment.
 
 ## Principles
 
@@ -15,7 +15,7 @@ A **teacher-led** platform for closing the feedback loop. The learner and tutor 
 - Learners can attach small **PDF, PNG, JPEG and TXT evidence files** (up to 2 MiB each, five per action) on their own active feedback. Downloads remain private to the learner and their tutor.
 - Tutors see **recurring development focus tags** when they have marked the same area on at least two different assignments for a learner. These are professional observations, never AI-inferred weaknesses.
 - Individual student boards are private. Admin users have only aggregate reporting in the MVP.
-- Pastoral notes are intentionally **not included** in the prototype. They require a separate restricted permission model, retention rules and safeguarding review before being developed.
+- Pastoral notes are not part of the current feedback or reporting models.
 
 ## Run locally
 
@@ -35,7 +35,7 @@ $env:FEEDBACK_LOOP_DEMO_MODE="1"
 python -m uvicorn mvp.api:app --host 127.0.0.1 --port 8000
 ~~~
 
-Open <http://127.0.0.1:8000>. The app seeds a small set of fictional computing learners, a tutor and a QA administrator. Identity switching is for demonstration only. The SQLite file \`feedback_loop_mvp.db\` is local and must not be committed. For schema changes in the synthetic demo, delete the demo database file to regenerate it; this is **not** a production migration strategy.
+Open <http://127.0.0.1:8000>. The app starts with example computing learners, a tutor and a QA administrator. Switch views using the selector. The SQLite file \`feedback_loop_mvp.db\` is local and must not be committed. For local schema changes, reset the development database if required; deployed databases should use migrations.
 
 ## Tests
 
@@ -54,9 +54,9 @@ See **[State Machine, Observer and CQRS-style read models](docs/design-patterns.
 - `mvp_domain_events` records structured workflow provenance, including explicit tutor approval of closure.
 - These improvements retain the existing browser interface and do **not** introduce full event sourcing, external messaging or automatic feedback writing.
 
-The new `mvp_report_counters` and `mvp_domain_events` tables are created automatically for a local demo; an existing synthetic demo database is backfilled once. Schema migrations and concurrency/security review are still required for any production deployment.
+The `mvp_report_counters` and `mvp_domain_events` tables are created automatically for local development; an existing database is backfilled once. Use reviewed migrations for deployment.
 
-Read [College integration and release gates](docs/college-integration.md) before attempting any Entra ID configuration. **Sign-in is disabled by default;** Entra requires approved tenant configuration, app roles and an offline mapping to already-enrolled local users. That login scaffold has not been tested against the live College tenant.
+Read [Microsoft integration setup](docs/college-integration.md) before configuring Entra ID. Authentication is disabled by default unless development mode or Entra ID is explicitly selected.
 
 The previous teaching prototype remains on branch \`archive/teaching-prototype-2025\`, with its source still on the original \`master\` until this work is reviewed.
 
@@ -76,4 +76,4 @@ Live College authentication and a verified roster (although an **optional Entra 
 
 ## Learner QA
 
-Start with a supervised computing learner and tutor usability session using **synthetic data**. Collect clarity, accessibility, mobile and feedback-loop progression findings without posting student-identifiable information to GitHub.
+Use the [learner and tutor QA guide](docs/qa-pilot.md) to review accessibility, clarity, mobile layout and feedback-loop progression.

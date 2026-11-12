@@ -109,7 +109,7 @@ def test_quality_reporting_aggregate_only(client):
     assert data["total"] == 6
     assert data["actions_required"] == 5
     assert data["awaiting_review"] == 1
-    assert "learners" not in data and "pastoral" in data["note"]
+    assert "learners" not in data and "learner_id" not in data and "feedback_text" not in data
     assert client.get("/api/threads").status_code == 403
     assert client.get("/api/threads/1").status_code == 403
 

@@ -198,7 +198,7 @@ class NewFeedback(BaseModel):
 
 
 class StatusChange(BaseModel):
-    status: Literal["ACTION_REQUIRED", "IN_PROGRESS", "READY_FOR_REVIEW", "CLOSED"]
+    status: Literal["ACTION_REQUIRED", "IN_PROGRESS", "READY_FOR_REVIEW", "CLOSED", "INFORMATION"]
     progress_note: str = Field(default="", max_length=2000)
 
 
@@ -313,6 +313,8 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             raise HTTPException(404, "Feedback not found.")
         if person.role == "admin":
             raise HTTPException(403, "Admin reports are aggregate only.")
+        if person.role not in ("learner", "tutor"):
+            raise HTTPException(403, "Feedback access is not permitted for this role.")
         return thread
 
     def summarise(db: Session, thread: Feedback) -> dict:
@@ -360,6 +362,8 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
     def list_threads(person: User = Depends(actor), db: Session = Depends(database)):
         if person.role == "admin":
             raise HTTPException(403, "Use aggregate reports.")
+        if person.role not in ("learner", "tutor"):
+            raise HTTPException(403, "Feedback access is not permitted for this role.")
         condition = Feedback.learner_id == person.id if person.role == "learner" else Feedback.tutor_id == person.id
         threads = db.scalars(select(Feedback).where(condition).order_by(Feedback.updated_at.desc())).all()
         return [summarise(db, t) for t in threads]

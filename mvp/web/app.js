@@ -1,4 +1,4 @@
-/* Feedback Loop: synthetic-data-only UI. Never use demo identity switching in production. */
+/* Feedback Loop user interface. Authentication mode is selected by the backend. */
 const people = [
   { id: "tutor-1", label: "Jo Morgan · Tutor" },
   { id: "learner-1", label: "Alex Taylor · Learner" },
@@ -60,8 +60,8 @@ async function refresh() {
     await render();
   } catch (err) {
     const text = state.mode === "entra"
-      ? '<p>Use your approved College account to sign in. Enrolment and Microsoft app roles are configured by College IT.</p><a class="button-primary" href="/auth/login">Sign in with Microsoft</a>'
-      : '<p>Start the app with <code>FEEDBACK_LOOP_DEMO_MODE=1</code>. This demonstration must run only on localhost.</p>';
+      ? '<p>Sign in using your College account.</p><a class="button-primary" href="/auth/login">Sign in with Microsoft</a>'
+      : '<p>Start the local development server with <code>FEEDBACK_LOOP_DEMO_MODE=1</code>.</p>';
     $("app").innerHTML = '<div class="error-panel"><h2>Unable to access the workspace</h2><p>' + escapeHtml(err.message) + '</p>' + text + '</div>';
   }
 }
@@ -126,9 +126,8 @@ async function renderReports() {
   const max = Math.max(1, ...report.by_status.map((s) => s.count));
   const focusMax = Math.max(1, ...report.focus_areas.map((s) => s.count));
   $("app").innerHTML =
-    '<section class="page-heading"><div><div class="eyebrow">QUALITY ASSURANCE · SYNTHETIC DATA</div><h1>Learning progress overview</h1><p>Aggregate measures to support conversations and improvement, not automated judgements.</p></div><span class="pale-pill">Computing pilot</span></section>' +
-    '<div class="report-alert"><strong>Demonstration report.</strong> All data is synthetic. This view contains no learner-level records or private pastoral notes.</div>' +
-    '<section class="metrics admin-metrics" aria-label="Quality summary"><div class="metric"><span>Feedback records</span><strong>' + report.total + '</strong><small>All demonstration entries</small></div><div class="metric"><span>Actions identified</span><strong>' + report.actions_required + '</strong><small>Feedback required is ticked</small></div><div class="metric"><span>Pending tutor review</span><strong>' + report.awaiting_review + '</strong><small>Ready for review stage</small></div><div class="metric"><span>Closed by tutors</span><strong>' + report.closed + '</strong><small>Reviewed and completed</small></div></section>' +
+    '<section class="page-heading"><div><div class="eyebrow">QUALITY ASSURANCE</div><h1>Learning progress overview</h1><p>Aggregate measures to support conversations and improvement, not automated judgements.</p></div><span class="pale-pill">Computing pilot</span></section>' +
+    '<section class="metrics admin-metrics" aria-label="Quality summary"><div class="metric"><span>Feedback records</span><strong>' + report.total + '</strong><small>Feedback recorded</small></div><div class="metric"><span>Actions identified</span><strong>' + report.actions_required + '</strong><small>Feedback required is ticked</small></div><div class="metric"><span>Pending tutor review</span><strong>' + report.awaiting_review + '</strong><small>Ready for review stage</small></div><div class="metric"><span>Closed by tutors</span><strong>' + report.closed + '</strong><small>Reviewed and completed</small></div></section>' +
     '<div class="report-grid"><section class="report-panel"><div class="panel-heading"><div><h2>Feedback pipeline</h2><p>Current distribution across workflow stages</p></div><span class="panel-chip">STATUS</span></div>' +
     '<div class="bar-list">' + report.by_status.map((item, i) =>
       '<div class="bar-row"><span>' + escapeHtml(labelFor(item.status)) + '</span><div class="bar-track"><div class="bar-fill fill-' + i + '" style="width:' + (item.count / max * 100) + '%"></div></div><strong>' + item.count + '</strong></div>'
@@ -137,7 +136,7 @@ async function renderReports() {
     '<div class="bar-list">' + (report.focus_areas.length ? report.focus_areas.map((item) =>
       '<div class="bar-row"><span>' + escapeHtml(item.name) + '</span><div class="bar-track"><div class="bar-fill focus-fill" style="width:' + (item.count / focusMax * 100) + '%"></div></div><strong>' + item.count + '</strong></div>'
     ).join("") : '<p>No focus areas have been tagged yet.</p>') + '</div></section></div>' +
-    '<section class="report-panel report-notes"><div class="panel-heading"><div><h2>Interpretation and next steps</h2><p>Quality reporting should prompt discussion, not replace professional judgement.</p></div></div><div class="principle-grid"><div><strong>01 · Review patterns</strong><p>Discuss repeated areas with tutors and consider appropriate teaching support.</p></div><div><strong>02 · Preserve context</strong><p>Numbers alone cannot explain a learner’s personal circumstances or development.</p></div><div><strong>03 · Protect privacy</strong><p>Do not include pastoral information in ordinary quality reports.</p></div></div></section>' +
+    '<section class="report-panel report-notes"><div class="panel-heading"><div><h2>Interpretation and next steps</h2><p>Quality reporting should prompt discussion, not replace professional judgement.</p></div></div><div class="principle-grid"><div><strong>01 · Review patterns</strong><p>Discuss repeated areas with tutors and consider appropriate teaching support.</p></div><div><strong>02 · Preserve context</strong><p>Numbers alone cannot explain a learner’s personal circumstances or development.</p></div><div><strong>03 · Close the loop</strong><p>Use these figures to identify where review and follow-up are still needed.</p></div></div></section>' +
     '<footer class="page-footer">' + escapeHtml(report.note) + '</footer>';
 }
 async function renderTutorFocus() {
@@ -190,7 +189,7 @@ function actionButtons(thread) {
   } else {
     if (thread.status === "READY_FOR_REVIEW") targetLabels.push(["CLOSED", "✓ Close feedback loop"], ["IN_PROGRESS", "Return for further work"]);
     if (thread.status === "INFORMATION") targetLabels.push(["CLOSED", "Mark as reviewed"]);
-    if (thread.status === "CLOSED") targetLabels.push(["ACTION_REQUIRED", "Reopen feedback"]);
+    if (thread.status === "CLOSED") targetLabels.push([thread.feedback_required ? "ACTION_REQUIRED" : "INFORMATION", "Reopen feedback"]);
   }
   return targetLabels.map(([key, label]) => '<button type="button" class="' + (key === "CLOSED" ? "button-primary" : "button-ghost") +
     '" data-status="' + key + '" data-id="' + thread.id + '">' + escapeHtml(label) + '</button>').join("");
@@ -312,7 +311,6 @@ async function initialise() {
     state.mode = (await res.json()).mode;
   } catch (_) { state.mode = "disabled"; }
   const isDemo = state.mode === "demo";
-  $("demoBadge").hidden = !isDemo;
   $("identityLabel").hidden = !isDemo;
   $("identitySelect").hidden = !isDemo;
   $("entraLogin").hidden = state.mode !== "entra";

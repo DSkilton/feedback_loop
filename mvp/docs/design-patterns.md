@@ -1,8 +1,6 @@
 # Feedback Loop: State Machine, Observer and CQRS-style reporting
 
-This refactor builds on the synthetic computing-pilot MVP and **does not
-provide production authentication, College data approval or Teams sync**.
-All feedback still comes from a tutor, never a language model.
+This refactor builds on the computing-pilot MVP. All feedback still comes from a tutor, never a language model.
 
 ## How they work together
 
@@ -107,7 +105,7 @@ explicit recovery tool when counters need repair (run during a controlled
 maintenance window, in a transaction). The QA endpoint **never** rebuilds
 the projection per request.
 
-## SOLID and privacy boundaries
+## SOLID and access boundaries
 
 - **Single Responsibility:** state-machine transitions, observer delivery,
   audit persistence and report queries have different jobs.
@@ -132,13 +130,11 @@ node --check mvp/web/app.js
 New tests cover the transition table, tutor-only closure, rejected operations
 having no side effects, structured approval events, projection accuracy,
 rollback on a broken projection, report reads not touching `mvp_feedback`,
-and backfilling existing synthetic demo databases.
+and backfilling existing databases.
 
-`Base.metadata.create_all` can create new tables for the local demonstration.
-**It is not a production migration approach.** Before College use, introduce
-reviewed migrations, tenant/roster access checks, retention/erasure controls,
-audit access policy and formal release approval. For a supervised demo with an
-older schema, use only synthetic data and back up before modifying the DB.
+`Base.metadata.create_all` creates new tables for local development.
+Use explicit migrations when deploying schema changes, and back up existing
+local databases before updating them.
 
 ## Future extensions
 

@@ -62,27 +62,30 @@ class ReportProjectionObserver:
 class AggregateReportReadModel:
     """Queries use the materialised counters, not the feedback write table."""
 
-    def rebuild(self, db: Session, feedback_model: type) -> None:
-        """One-time bootstrap/explicit recovery of the read model.
-
-        Reads only status, action flag and human-entered focus tags.
-        Do not invoke on every GET /api/reports.
-        """
-        db.execute(delete(ReportCounter))
-        db.flush()
+    def expected_counters(self, db: Session, feedback_model: type) -> dict[str, int]:
+        """Derive authoritative aggregate counts without loading feedback content."""
         total = db.scalar(select(func.count()).select_from(feedback_model)) or 0
         actions = db.scalar(select(func.count()).select_from(feedback_model).where(
             feedback_model.feedback_required.is_(True))) or 0
-        states = dict(db.execute(
-            select(feedback_model.status, func.count()).group_by(feedback_model.status)).all())
-        tags = db.execute(
+        state_rows = db.execute(
+            select(feedback_model.status, func.count()).group_by(feedback_model.status)).all()
+        tag_rows = db.execute(
             select(feedback_model.focus_tag, func.count())
-            .where(feedback_model.focus_tag != "")
+            .where(feedback_model.focus_tag.is_not(None), feedback_model.focus_tag != "")
             .group_by(feedback_model.focus_tag)).all()
-        values = {"total": total, "actions_required": actions}
-        values.update({f"status:{key}": states.get(key, 0) for key in STATES})
-        for tag, count in tags:
-            values[f"focus:{tag}"] = count
+        counters = {"total": total, "actions_required": actions}
+        counters.update({f"status:{state}": 0 for state in STATES})
+        for state, count in state_rows:
+            counters[f"status:{state}"] = count
+        for tag, count in tag_rows:
+            counters[f"focus:{tag}"] = count
+        return counters
+
+    def rebuild(self, db: Session, feedback_model: type) -> None:
+        """Explicit rebuild of the read model, to be committed by the caller."""
+        values = self.expected_counters(db, feedback_model)
+        db.execute(delete(ReportCounter))
+        db.flush()
         db.add_all(ReportCounter(key=key, value=count) for key, count in values.items())
         db.flush()
 

@@ -198,7 +198,7 @@ class NewFeedback(BaseModel):
 
 
 class StatusChange(BaseModel):
-    status: Literal["ACTION_REQUIRED", "IN_PROGRESS", "READY_FOR_REVIEW", "CLOSED"]
+    status: Literal["ACTION_REQUIRED", "IN_PROGRESS", "READY_FOR_REVIEW", "CLOSED", "INFORMATION"]
     progress_note: str = Field(default="", max_length=2000)
 
 
@@ -313,6 +313,8 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             raise HTTPException(404, "Feedback not found.")
         if person.role == "admin":
             raise HTTPException(403, "Admin reports are aggregate only.")
+        if person.role not in ("learner", "tutor"):
+            raise HTTPException(403, "Feedback access is not permitted for this role.")
         return thread
 
     def summarise(db: Session, thread: Feedback) -> dict:

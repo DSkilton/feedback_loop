@@ -109,5 +109,5 @@ class AggregateReportReadModel:
                 {"name": name, "count": count} for name, count in
                 sorted(focus.items(), key=lambda item: (-item[1], item[0].casefold()))
             ],
-            "note": "Synthetic demonstration data. Aggregate reporting only; no pastoral notes.",
+            "note": "Counts reflect recorded feedback and teacher-entered focus areas.",
         }

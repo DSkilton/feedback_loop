@@ -39,7 +39,7 @@ FEEDBACK_LOOP_SESSION_SECRET=<random-secret-at-least-32-characters>
 FEEDBACK_LOOP_ENTRA_ALLOWLIST_PATH=/run/secrets/approved-identity-map.json
 ~~~
 
-When \`FEEDBACK_LOOP_AUTH_MODE\` is absent and demo mode is not selected, all data APIs deny requests. **Never enable \`FEEDBACK_LOOP_DEMO_MODE=1\` on a public host.** That mode accepts a synthetic demonstration identity header and is explicitly insecure.
+When no authentication mode is enabled, data APIs deny requests. Development identity switching is intended for `127.0.0.1` only.
 
 After sign-in, the app stores only an approved mapped identity and CSRF token in a signed, HTTPS-only, SameSite cookie, without storing Microsoft Graph access tokens. The OIDC implementation has not yet been tested against the College tenant.
 

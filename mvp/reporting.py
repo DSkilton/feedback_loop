@@ -8,8 +8,9 @@ backfills counters from the write model; this is *not* event sourcing.
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime, timezone
 
-from sqlalchemy import Integer, String, delete, func, select, update
+from sqlalchemy import DateTime, Integer, String, delete, func, select, update
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from .base import Base
@@ -21,6 +22,15 @@ class ReportCounter(Base):
     __tablename__ = "mvp_report_counters"
     key: Mapped[str] = mapped_column(String(200), primary_key=True)
     value: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class ReportProjectionState(Base):
+    """Bootstrap marker; missing counters are never silently repaired on restart."""
+    __tablename__ = "mvp_report_projection_state"
+    name: Mapped[str] = mapped_column(String(40), primary_key=True)
+    initialized_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+    )
 
 
 def _adjust(db: Session, key: str, change: int) -> None:
@@ -90,8 +100,14 @@ class AggregateReportReadModel:
         db.flush()
 
     def ensure_initialized(self, db: Session, feedback_model: type) -> None:
-        if db.get(ReportCounter, "total") is None:
+        if db.get(ReportProjectionState, "aggregate-v1") is not None:
+            return
+        # Backfill a genuinely new projection once. Once marked initialized,
+        # missing counters indicate drift and require an audited repair.
+        if (db.scalar(select(func.count()).select_from(ReportCounter)) or 0) == 0:
             self.rebuild(db, feedback_model)
+        db.add(ReportProjectionState(name="aggregate-v1"))
+        db.flush()
 
     def snapshot(self, db: Session) -> dict:
         counters = {c.key: c.value for c in db.scalars(select(ReportCounter)).all()}

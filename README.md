@@ -33,7 +33,10 @@ PowerShell and full developer instructions are in [mvp/README.md](mvp/README.md)
 
 - \`master\` — original 2025 Python teaching prototype.
 - \`archive/teaching-prototype-2025\` — preserved snapshot of that prototype.
-- \`feature/feedback-loop-mvp\` — proposed teacher-led web MVP, tracked in [draft PR #9](https://github.com/DSkilton/feedback_loop/pull/9).
+- \`feature/feedback-loop-mvp\` — first web MVP ([draft PR #9](https://github.com/DSkilton/feedback_loop/pull/9)).
+- \`feature/entra-teams-evidence-focus\` — Teams handoff, evidence and tutor focus ([draft PR #12](https://github.com/DSkilton/feedback_loop/pull/12)).
+- \`feature/feedback-workflow-observers-readmodels\` — lifecycle and reporting patterns ([draft PR #18](https://github.com/DSkilton/feedback_loop/pull/18)).
+- \`feature/feedback-loop-polish-regression-stories\` — copy cleanup and additional regressions ([draft PR #19](https://github.com/DSkilton/feedback_loop/pull/19)).
 
 ### Development roadmap
 

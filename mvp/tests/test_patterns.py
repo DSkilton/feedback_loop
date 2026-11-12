@@ -162,7 +162,8 @@ def test_backfill_older_database_and_read_only_query(system):
     client, path, db_url = system
     with sqlite3.connect(path) as db:
         db.execute("delete from mvp_report_counters")
-    # Simulate upgrading an existing local demo database, without re-seeding.
+        db.execute("delete from mvp_report_projection_state")
+    # Simulate an older database with no reporting projection installed.
     create_app(db_url=db_url, demo_mode=False)
     assert query(path, "select value from mvp_report_counters where key='total'") == [(6,)]
     engine = create_engine(db_url)

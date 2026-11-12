@@ -181,3 +181,19 @@ def test_normal_report_does_not_trigger_reconciliation_or_audit(setup):
     for _ in range(3):
         assert client.get("/api/reports").status_code == 200
     assert query(path, "select count(*) from mvp_report_maintenance_audit") == [(0,)]
+
+
+def test_restart_does_not_silently_repair_existing_projection(setup, monkeypatch):
+    client, path = setup
+    change(path, "delete from mvp_report_counters where key='total'")
+    assert query(path, "select name from mvp_report_projection_state") == [("aggregate-v1",)]
+    # Startup must not repair missing data behind the operator's back.
+    create_app(db_url=f"sqlite:///{path}", demo_mode=False)
+    assert query(path, "select key from mvp_report_counters where key='total'") == []
+    as_user(client, "admin-1")
+    drift = send_check(client).json()
+    assert drift["consistent"] is False
+    assert any(row["metric"] == "total" for row in drift["discrepancies"])
+    monkeypatch.setenv("FEEDBACK_LOOP_REPORT_REPAIR_USERS", "admin-1")
+    assert send_repair(client).json()["consistent_after"] is True
+    assert query(path, "select value from mvp_report_counters where key='total'") == [(6,)]

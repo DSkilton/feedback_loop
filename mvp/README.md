@@ -35,7 +35,7 @@ $env:FEEDBACK_LOOP_DEMO_MODE="1"
 python -m uvicorn mvp.api:app --host 127.0.0.1 --port 8000
 ~~~
 
-Open <http://127.0.0.1:8000>. The app starts with example computing learners, a tutor and a QA administrator. Switch views using the selector. The SQLite file \`feedback_loop_mvp.db\` is local and must not be committed. For schema changes in the synthetic demo, delete the demo database file to regenerate it; this is **not** a production migration strategy.
+Open <http://127.0.0.1:8000>. The app starts with example computing learners, a tutor and a QA administrator. Switch views using the selector. The SQLite file \`feedback_loop_mvp.db\` is local and must not be committed. For local schema changes, reset the development database if required; deployed databases should use migrations.
 
 ## Tests
 

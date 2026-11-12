@@ -362,6 +362,8 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
     def list_threads(person: User = Depends(actor), db: Session = Depends(database)):
         if person.role == "admin":
             raise HTTPException(403, "Use aggregate reports.")
+        if person.role not in ("learner", "tutor"):
+            raise HTTPException(403, "Feedback access is not permitted for this role.")
         condition = Feedback.learner_id == person.id if person.role == "learner" else Feedback.tutor_id == person.id
         threads = db.scalars(select(Feedback).where(condition).order_by(Feedback.updated_at.desc())).all()
         return [summarise(db, t) for t in threads]

@@ -14,6 +14,9 @@ A **teacher-led** platform for closing the feedback loop. The learner and tutor 
 - When a learner requests tutor review they must explain what they changed; the explanation is stored in the progress timeline.
 - Learners can attach small **PDF, PNG, JPEG and TXT evidence files** (up to 2 MiB each, five per action) on their own active feedback. Downloads remain private to the learner and their tutor.
 - Tutors see **recurring development focus tags** when they have marked the same area on at least two different assignments for a learner. These are professional observations, never AI-inferred weaknesses.
+- Students and tutors belong to an approved **teaching cohort**. Tutors see only assigned learners and cohort assignments. A second fictional cohort is included to test access boundaries.
+- Tutors can select assignment-specific **assessment criteria/rubrics** and write short personal feedback against them.
+- Teachers can create long-term **learner improvement targets**, link feedback from several assignments, then confirm achievement or reopen the target with a written professional judgement. Learners can read their own targets but cannot close them.
 - Individual student boards are private. Admin users have only aggregate reporting in the MVP.
 - Pastoral notes are not part of the current feedback or reporting models.
 
@@ -35,7 +38,7 @@ $env:FEEDBACK_LOOP_DEMO_MODE="1"
 python -m uvicorn mvp.api:app --host 127.0.0.1 --port 8000
 ~~~
 
-Open <http://127.0.0.1:8000>. The app starts with example computing learners, a tutor and a QA administrator. Switch views using the selector. The SQLite file \`feedback_loop_mvp.db\` is local and must not be committed. For local schema changes, reset the development database if required; deployed databases should use migrations.
+Open <http://127.0.0.1:8000>. The local development environment starts with two computing cohorts, tutors, learners, rubrics, long-term targets and a QA administrator. Switch views using the selector. The SQLite file `feedback_loop_mvp.db` is local and must not be committed. For development schema changes, reset the local database as needed; any deployed database requires reviewed migrations.
 
 ## Tests
 
@@ -43,6 +46,8 @@ Open <http://127.0.0.1:8000>. The app starts with example computing learners, a 
 python -m pytest -q mvp/tests
 node --check mvp/web/app.js
 ~~~
+
+Read [cohort, rubric and long-term target architecture](docs/learning-foundations.md) for the data model, teacher workflows and access rules.
 
 ## Architecture and design patterns
 
@@ -74,7 +79,7 @@ The previous teaching prototype remains on branch \`archive/teaching-prototype-2
 
 ## Deliberately out of scope for this MVP
 
-Live College authentication and a verified roster (although an **optional Entra OIDC scaffold** now exists); Graph/Teams synchronisation; automatic reminders; genuine pastoral records; multi-tutor permission mapping; deadlines; antivirus scanning and secure evidence storage; production migration tooling; exports and retention policy. These are tracked in GitHub issues #4–#8 and require College agreement.
+Live College authentication and a **verified, IT-managed roster** (although an optional Entra OIDC scaffold and synthetic cohort memberships exist); Graph/Teams synchronisation; automatic reminders; genuine pastoral records; programme-lead enrolment administration; multi-tutor permission mapping; deadlines; antivirus scanning and secure evidence storage; production migration tooling; exports and retention policy. These remain tracked in GitHub issues and require College agreement.
 
 ## Learner QA
 

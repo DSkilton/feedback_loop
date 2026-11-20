@@ -36,6 +36,20 @@ Test whether the Feedback Loop Kanban board makes feedback easier to **understan
 - [ ] Mark the same development focus on **two different assignments** and locate it in the recurring focus panel.
 - [ ] Discuss whether the focus panel improves tutor conversations or risks being misunderstood as a judgement about the learner.
 
+## Course, criterion and long-term target QA
+
+- [ ] Compare tutor Jo Morgan's Computing Pilot A cohort against tutor Sam Patel's Pilot B cohort. Neither should see the other's learner feedback.
+- [ ] Check that the learner cohort view contains no classmate roster.
+- [ ] Tutor selects a Java assignment criterion from the rubric and writes personal feedback in their own words.
+- [ ] Tutor adds a new criterion code and description for an authorised assignment.
+- [ ] Tutor creates a long-term improvement target and links feedback from **two different assignments**.
+- [ ] Learner can see the target and assignments, but cannot mark the target achieved.
+- [ ] Tutor cannot mark the target achieved until at least one linked feedback action has been closed.
+- [ ] Tutor writes a short professional explanation, marks the target achieved, and can reopen it with another explanation.
+- [ ] Verify that manually tagged repeated needs are separated by teaching cohort.
+- [ ] Ask whether the distinction between a one-off feedback **action** and a longer-term **target** is clear to learners.
+- [ ] Demonstrate that no teacher or learner can self-enrol into another cohort.
+
 ## Quality / IT tests
 
 - [ ] Admin sees **aggregate** statistics but not individual feedback, evidence or private pastoral records.

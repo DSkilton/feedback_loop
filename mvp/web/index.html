@@ -35,6 +35,8 @@
             <option value="tutor-1">Jo Morgan · Tutor</option>
             <option value="learner-1">Alex Taylor · Learner</option>
             <option value="learner-2">Morgan Ellis · Learner</option>
+            <option value="tutor-2">Sam Patel · Tutor (Pilot B)</option>
+            <option value="learner-3">Jamie Reed · Learner (Pilot B)</option>
             <option value="admin-1">Quality Team · Administrator</option>
           </select>
           <a class="button-primary" href="/auth/login" id="entraLogin" hidden>Sign in with Microsoft</a>
@@ -61,12 +63,16 @@
       <button class="close-icon" type="button" data-close="newDialog" aria-label="Close form">×</button>
     </div>
     <form id="newForm" class="feedback-form">
+      <label>Teaching cohort<select name="cohort_id" id="cohortSelect" required></select></label>
       <label>Learning assignment<select name="assignment_id" id="assignmentSelect" required></select></label>
       <label>Learner<select name="learner_id" id="learnerSelect" required></select></label>
-      <label>Assessment criterion <span class="optional">(optional)</span><input name="criterion" maxlength="160" placeholder="e.g. LO2 · Encapsulation"></label>
+      <div class="rubric-select-row"><label>Assessment criterion<select name="criterion_id" id="criterionSelect"><option value="">None selected</option></select></label>
+      <button type="button" class="button-ghost" id="addCriterionButton">＋ Add criterion</button></div>
+      <label>Additional criterion note <span class="optional">(used if no structured criterion is selected)</span><input name="criterion" maxlength="160" placeholder="e.g. LO2 · Encapsulation"></label>
       <label>Teacher's feedback<textarea name="feedback_text" required maxlength="4000" rows="3" placeholder="Specific strengths and development points written by you"></textarea></label>
       <label>Next step<input name="next_step" maxlength="2000" placeholder="A specific action for the student to take"></label>
       <label>Development focus <span class="optional">(optional)</span><input name="focus_tag" maxlength="50" placeholder="e.g. Debugging"></label>
+      <label>Link to a long-term improvement target <span class="optional">(optional)</span><select name="target_id" id="targetSelect"><option value="">No target linked</option></select></label>
       <fieldset class="teams-handoff">
         <legend>Microsoft Teams handoff</legend>
         <p class="help">First record the initial assessment feedback in Teams. This application handles the next-step conversation.</p>
@@ -83,6 +89,19 @@
       <p class="help">Record initial feedback in Teams as well. This pilot does not automatically sync with Microsoft Teams.</p>
       <div id="createError" class="form-error" role="alert"></div>
       <div class="form-buttons"><button type="button" class="button-ghost" data-close="newDialog">Cancel</button><button type="submit" class="button-primary">Share feedback</button></div>
+    </form>
+  </dialog>
+  <dialog id="criterionDialog" class="create-dialog" aria-labelledby="criterionTitle">
+    <div class="modal-header">
+      <div><span class="eyebrow">TUTOR · ASSIGNMENT RUBRIC</span><h2 id="criterionTitle">Add assessment criterion</h2></div>
+      <button class="close-icon" type="button" data-close="criterionDialog" aria-label="Close criterion form">×</button>
+    </div>
+    <form id="criterionForm" class="feedback-form">
+      <p class="help" id="criterionContext"></p>
+      <label>Criterion code<input name="code" required maxlength="30" placeholder="e.g. P3, LO2"></label>
+      <label>Criterion description<textarea name="description" required maxlength="300" rows="3" placeholder="Write the awarding-body criterion in your own teaching context"></textarea></label>
+      <div id="criterionError" class="form-error" role="alert"></div>
+      <div class="form-buttons"><button type="button" class="button-ghost" data-close="criterionDialog">Cancel</button><button type="submit" class="button-primary">Add criterion</button></div>
     </form>
   </dialog>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>

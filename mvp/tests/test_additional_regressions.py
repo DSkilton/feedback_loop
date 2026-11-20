@@ -88,18 +88,34 @@ def test_unknown_roles_cannot_access_thread_list_details_or_reporting(project):
 
 
 def test_tutor_assignment_scope_applies_to_read_and_write_endpoints(project):
-    client, path = project
-    with sqlite3.connect(path) as db:
-        db.execute("insert into mvp_users (id, name, role) values (?, ?, ?)",
-                   ("tutor-2", "Second Tutor", "tutor"))
-        db.execute("update mvp_feedback set tutor_id='tutor-2' where id=1")
-    identity(client, "tutor-1")
-    assert client.get("/api/threads/1").status_code == 404
-    assert client.post("/api/threads/1/status", json={"status": "IN_PROGRESS"}).status_code == 404
-    assert client.get("/api/threads/1/evidence/1").status_code == 404
+    client, _ = project
     identity(client, "tutor-2")
-    assert client.get("/api/threads/1").status_code == 200
-    assert client.post("/api/threads/1/status", json={"status": "IN_PROGRESS"}).status_code == 200
+    created = client.post("/api/threads", json={
+        "assignment_id": "web",
+        "cohort_id": "web-26",
+        "learner_id": "learner-3",
+        "feedback_text": "Explain the validation rules for the web assignment.",
+        "next_step": "Apply the corrections and check the result.",
+        "teams_reference": "Web cohort review task",
+        "teams_recorded_confirmed": True,
+        "feedback_required": True,
+    })
+    assert created.status_code == 201
+    feedback_id = created.json()["id"]
+
+    identity(client, "tutor-1")
+    assert client.get(f"/api/threads/{feedback_id}").status_code == 404
+    assert client.post(f"/api/threads/{feedback_id}/status",
+                       json={"status": "IN_PROGRESS"}).status_code == 404
+    assert client.get(f"/api/threads/{feedback_id}/evidence/1").status_code == 404
+
+    identity(client, "tutor-2")
+    assert client.get("/api/threads/1").status_code == 404
+    assert client.post("/api/threads/1/status",
+                       json={"status": "IN_PROGRESS"}).status_code == 404
+    assert client.get(f"/api/threads/{feedback_id}").status_code == 200
+    assert client.post(f"/api/threads/{feedback_id}/status",
+                       json={"status": "IN_PROGRESS"}).status_code == 200
 
 
 def test_duplicate_teams_submission_does_not_change_projection_or_audit(project):

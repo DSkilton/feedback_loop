@@ -128,6 +128,7 @@ async function renderReports() {
   $("app").innerHTML =
     '<section class="page-heading"><div><div class="eyebrow">QUALITY ASSURANCE</div><h1>Learning progress overview</h1><p>Aggregate measures to support conversations and improvement, not automated judgements.</p></div><span class="pale-pill">Computing pilot</span></section>' +
     '<section class="metrics admin-metrics" aria-label="Quality summary"><div class="metric"><span>Feedback records</span><strong>' + report.total + '</strong><small>Feedback recorded</small></div><div class="metric"><span>Actions identified</span><strong>' + report.actions_required + '</strong><small>Feedback required is ticked</small></div><div class="metric"><span>Pending tutor review</span><strong>' + report.awaiting_review + '</strong><small>Ready for review stage</small></div><div class="metric"><span>Closed by tutors</span><strong>' + report.closed + '</strong><small>Reviewed and completed</small></div></section>' +
+    '<section class="report-panel report-integrity" aria-label="Report integrity"><div class="panel-heading"><div><h2>Report integrity</h2><p>Compare displayed totals against recorded feedback</p></div><button class="button-ghost" type="button" data-reconcile="check">Check report totals</button></div><div id="reportIntegrityResult" role="status" aria-live="polite"><p class="quiet">No reconciliation check run this session.</p></div></section>' +
     '<div class="report-grid"><section class="report-panel"><div class="panel-heading"><div><h2>Feedback pipeline</h2><p>Current distribution across workflow stages</p></div><span class="panel-chip">STATUS</span></div>' +
     '<div class="bar-list">' + report.by_status.map((item, i) =>
       '<div class="bar-row"><span>' + escapeHtml(labelFor(item.status)) + '</span><div class="bar-track"><div class="bar-fill fill-' + i + '" style="width:' + (item.count / max * 100) + '%"></div></div><strong>' + item.count + '</strong></div>'
@@ -138,6 +139,35 @@ async function renderReports() {
     ).join("") : '<p>No focus areas have been tagged yet.</p>') + '</div></section></div>' +
     '<section class="report-panel report-notes"><div class="panel-heading"><div><h2>Interpretation and next steps</h2><p>Quality reporting should prompt discussion, not replace professional judgement.</p></div></div><div class="principle-grid"><div><strong>01 · Review patterns</strong><p>Discuss repeated areas with tutors and consider appropriate teaching support.</p></div><div><strong>02 · Preserve context</strong><p>Numbers alone cannot explain a learner’s personal circumstances or development.</p></div><div><strong>03 · Close the loop</strong><p>Use these figures to identify where review and follow-up are still needed.</p></div></div></section>' +
     '<footer class="page-footer">' + escapeHtml(report.note) + '</footer>';
+}
+async function checkReportIntegrity(button) {
+  if (state.bootstrap?.user.role !== "admin") return;
+  const target = $("reportIntegrityResult");
+  button.disabled = true;
+  if (target) target.textContent = "Checking report totals…";
+  try {
+    const result = await api("/api/reports/reconcile", {
+      method: "POST",
+      body: JSON.stringify({ reason: "Quality dashboard reconciliation check" }),
+    });
+    if (!target) return;
+    if (result.consistent) {
+      target.innerHTML = '<p class="quiet">✓ All reporting counters match recorded feedback. Checked ' +
+        escapeHtml(niceDate(result.checked_at)) + '.</p>';
+    } else {
+      target.innerHTML = '<p class="quiet"><strong>' + result.mismatch_count +
+        ' reporting discrepancies found.</strong> Review the differences below and request an authorised repair.</p>' +
+        '<ul class="report-differences">' + result.discrepancies.map((item) =>
+          '<li><strong>' + escapeHtml(item.metric) + '</strong> · Expected ' +
+          (item.expected === null ? 'missing' : item.expected) + ', stored ' +
+          (item.actual === null ? 'missing' : item.actual) + '</li>'
+        ).join("") + '</ul>';
+    }
+  } catch (error) {
+    if (target) target.textContent = "Unable to run report check: " + error.message;
+  } finally {
+    button.disabled = false;
+  }
 }
 async function renderTutorFocus() {
   const target = $("focusSection");
@@ -270,6 +300,8 @@ document.addEventListener("click", async (event) => {
   if (close) { $(close.dataset.close).close(); return; }
   const open = event.target.closest("[data-open]");
   if (open) { try { await openThread(open.dataset.open); } catch (e) { notify(e.message); } return; }
+  const check = event.target.closest("[data-reconcile]");
+  if (check) { await checkReportIntegrity(check); return; }
   const evidence = event.target.closest("[data-evidence]");
   if (evidence) {
     const [fid, eid] = evidence.dataset.evidence.split(":");

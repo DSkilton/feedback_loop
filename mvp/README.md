@@ -48,6 +48,8 @@ node --check mvp/web/app.js
 
 See **[State Machine, Observer and CQRS-style read models](docs/design-patterns.md)** for the diagram, transition table and SOLID rationale.
 
+The quality reporting projection can now be **checked and repaired independently of the dashboard**, with restricted operator permissions and audit records. See the [reconciliation runbook](docs/reconciliation.md) (issue #23).
+
 - `mvp/workflow.py` centrally controls valid learner/tutor state transitions. Only a tutor may close feedback.
 - `mvp/events.py` publishes typed changes to independent, synchronous audit and reporting observers.
 - `mvp/reporting.py` maintains aggregate counters in the same database transaction; the QA dashboard reads counters without scanning individual feedback each time.

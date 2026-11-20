@@ -24,6 +24,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
 from .base import Base
 from .events import (FEEDBACK_CREATED, FEEDBACK_STATUS_CHANGED, FeedbackChanged, FeedbackEventPublisher)
 from .reporting import AggregateReportReadModel, ReportProjectionObserver
+from .reconciliation import ReportReconciliationService
 from .workflow import (ACTION_REQUIRED, IN_PROGRESS, READY_FOR_REVIEW, CLOSED, INFORMATION,
                        FeedbackStateMachine, TransitionRejected)
 
@@ -198,12 +199,20 @@ class NewFeedback(BaseModel):
 
 
 class StatusChange(BaseModel):
-    status: Literal["ACTION_REQUIRED", "IN_PROGRESS", "READY_FOR_REVIEW", "CLOSED"]
+    status: Literal["ACTION_REQUIRED", "IN_PROGRESS", "READY_FOR_REVIEW", "CLOSED", "INFORMATION"]
     progress_note: str = Field(default="", max_length=2000)
 
 
 class NewComment(BaseModel):
     body: str = Field(min_length=1, max_length=2000)
+
+
+class ReportCheckCommand(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class ReportRepairCommand(ReportCheckCommand):
+    confirmation: Literal["REBUILD_REPORT_COUNTERS"]
 
 
 def seed_demo(db: Session) -> None:
@@ -267,6 +276,7 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         db.commit()
 
     machine = FeedbackStateMachine()
+    reconciler = ReportReconciliationService(read_model)
     publisher = FeedbackEventPublisher(audit_feedback_change, ReportProjectionObserver())
     app = FastAPI(title="Feedback Loop — Local MVP", version="0.1.0")
     app.mount("/assets", StaticFiles(directory=WEB), name="assets")
@@ -313,6 +323,8 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             raise HTTPException(404, "Feedback not found.")
         if person.role == "admin":
             raise HTTPException(403, "Admin reports are aggregate only.")
+        if person.role not in ("learner", "tutor"):
+            raise HTTPException(403, "Feedback access is not permitted for this role.")
         return thread
 
     def summarise(db: Session, thread: Feedback) -> dict:
@@ -360,6 +372,8 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
     def list_threads(person: User = Depends(actor), db: Session = Depends(database)):
         if person.role == "admin":
             raise HTTPException(403, "Use aggregate reports.")
+        if person.role not in ("learner", "tutor"):
+            raise HTTPException(403, "Feedback access is not permitted for this role.")
         condition = Feedback.learner_id == person.id if person.role == "learner" else Feedback.tutor_id == person.id
         threads = db.scalars(select(Feedback).where(condition).order_by(Feedback.updated_at.desc())).all()
         return [summarise(db, t) for t in threads]
@@ -540,6 +554,34 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         recurring.sort(key=lambda item: (-item["assignment_count"], item["learner"], item["focus"]))
         return {"recurring": recurring,
                 "note": "Tutor-authored focus tags only; review context with the learner."}
+
+    @app.post("/api/reports/reconcile")
+    def reconcile_reports(payload: ReportCheckCommand, person: User = Depends(actor),
+                          db: Session = Depends(database)):
+        if person.role != "admin":
+            raise HTTPException(403, "Quality administrator role required.")
+        try:
+            result = reconciler.run(db, Feedback, actor_id=person.id, reason=payload.reason)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        db.commit()
+        return result
+
+    @app.post("/api/reports/reconcile/repair")
+    def repair_reports(payload: ReportRepairCommand, person: User = Depends(actor),
+                       db: Session = Depends(database)):
+        if person.role != "admin":
+            raise HTTPException(403, "Quality administrator role required.")
+        allowed_ids = {id.strip() for id in os.getenv("FEEDBACK_LOOP_REPORT_REPAIR_USERS", "").split(",") if id.strip()}
+        if person.id not in allowed_ids:
+            raise HTTPException(403, "Reporting repair permission is not configured for this account.")
+        try:
+            result = reconciler.run(db, Feedback, actor_id=person.id,
+                                    reason=payload.reason, repair=True)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        db.commit()
+        return result
 
     @app.get("/api/reports")
     def reports(person: User = Depends(actor), db: Session = Depends(database)):

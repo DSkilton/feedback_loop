@@ -1,7 +1,5 @@
 # Computing learner and tutor QA pilot
 
-**Only synthetic data. Do not enter actual learner identities, academic work, safeguarding information or pastoral notes in this prototype.**
-
 ## Purpose
 
 Test whether the Feedback Loop Kanban board makes feedback easier to **understand, act on and discuss**. Feedback remains teacher-authored. The application must not replace a tutor's professional judgement or pastoral relationship.
@@ -9,17 +7,17 @@ Test whether the Feedback Loop Kanban board makes feedback easier to **understan
 ## Suggested roles and session
 
 - Two to five volunteer computing learners plus one or two computing tutors.
-- One tutor moderates the synthetic dataset and observes use; no individual learner is assessed or scored.
+- One tutor moderates the practice dataset and observes usability rather than assessing individual learners.
 - Approximately a short classroom workshop with think-aloud discussion and an anonymous usability questionnaire, when approved through College processes.
-- Report bugs to GitHub **without student-identifying details**, using fake names and fictitious assignment material.
+- Record reproducible bugs without naming learners or including work samples.
 
 ## Learner tasks
 
-- [ ] Locate the next step on a synthetic Java/database assignment.
+- [ ] Locate the next step on a Java/database assignment.
 - [ ] Explain in their own words what the tutor is asking them to improve.
 - [ ] Move an action to **In progress** using mouse **and keyboard**.
 - [ ] Leave a question for the tutor, then find the reply in the timeline.
-- [ ] Add a tiny synthetic PDF/TXT evidence file and describe what it shows.
+- [ ] Attach a small PDF/TXT evidence file and describe what it shows.
 - [ ] Submit an improvement for tutor review with a short explanation of their changes.
 - [ ] Verify that the learner **cannot close** the feedback loop.
 - [ ] Check the experience at phone, tablet and desktop widths.
@@ -27,11 +25,11 @@ Test whether the Feedback Loop Kanban board makes feedback easier to **understan
 
 ## Tutor tasks
 
-- [ ] Record fictional initial feedback in Teams (or use a synthetic reference).
-- [ ] Create a teacher-authored entry in Feedback Loop with the Teams reference.
+- [ ] Confirm the initial feedback reference in Teams.
+- [ ] Create a teacher-authored entry in Feedback Loop with its Teams reference.
 - [ ] Try to submit the entry without confirming initial feedback was recorded in Teams; it should be rejected.
 - [ ] Set **Feedback requires student action** and include one short, actionable next step.
-- [ ] Review evidence from an assigned fictional student and return work for improvements.
+- [ ] Review evidence from an assigned learner and return work for improvements.
 - [ ] Close a reviewed action, then reopen it and explain the reason.
 - [ ] Mark the same development focus on **two different assignments** and locate it in the recurring focus panel.
 - [ ] Discuss whether the focus panel improves tutor conversations or risks being misunderstood as a judgement about the learner.
@@ -41,11 +39,10 @@ Test whether the Feedback Loop Kanban board makes feedback easier to **understan
 - [ ] Admin sees **aggregate** statistics but not individual feedback, evidence or private pastoral records.
 - [ ] Another learner cannot view or download a classmate's attachments.
 - [ ] Executable, HTML, renamed-file and oversized uploads are rejected.
-- [ ] Anonymous requests and fake identity headers are rejected when demo mode is disabled.
+- [ ] Anonymous requests and untrusted identity headers are rejected when development mode is disabled.
 - [ ] Navigate the entire interface with keyboard only; assess focus order, labels and visibility.
 - [ ] Check screen reader announcements and contrast against WCAG 2.2 AA.
 - [ ] No requests are sent to an AI model or an external student-feedback service.
-- [ ] Do not run a live College tenant or real student-data pilot until College IT and DPO approval.
 
 ## Learner feedback questions
 

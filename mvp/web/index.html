@@ -22,16 +22,14 @@
       </nav>
       <div class="sidebar-bottom">
         <div class="privacy"><span aria-hidden="true">♧</span><p><strong>People before process.</strong><br>Feedback is written by teachers, not AI.</p></div>
-        <small>Local prototype · Synthetic data only</small>
       </div>
     </aside>
     <div class="workspace">
       <header class="topbar">
         <span class="eyebrow">MIDDLESBROUGH COLLEGE · CONCEPT PILOT</span>
         <div class="topbar-right">
-          <span class="demo-badge" id="demoBadge">DEMO MODE</span>
-          <label class="identity-select-label" id="identityLabel" for="identitySelect">View as</label>
-          <select id="identitySelect" aria-label="Switch synthetic demonstration identity">
+          <label class="identity-select-label" id="identityLabel" for="identitySelect">Switch view</label>
+          <select id="identitySelect" aria-label="Switch between tutor, learner and administrator views">
             <option value="tutor-1">Jo Morgan · Tutor</option>
             <option value="learner-1">Alex Taylor · Learner</option>
             <option value="learner-2">Morgan Ellis · Learner</option>
@@ -42,7 +40,7 @@
         </div>
       </header>
       <main id="app" aria-live="polite">
-        <p class="loading">Loading demonstration…</p>
+        <p class="loading">Loading your workspace…</p>
       </main>
     </div>
   </div>
@@ -80,7 +78,6 @@
         </details>
       </fieldset>
       <label class="tick-row"><input name="feedback_required" type="checkbox" checked> <span><strong>Feedback requires student action</strong><small>Untick for feedback shared for information only</small></span></label>
-      <p class="help">Record initial feedback in Teams as well. This pilot does not automatically sync with Microsoft Teams.</p>
       <div id="createError" class="form-error" role="alert"></div>
       <div class="form-buttons"><button type="button" class="button-ghost" data-close="newDialog">Cancel</button><button type="submit" class="button-primary">Share feedback</button></div>
     </form>

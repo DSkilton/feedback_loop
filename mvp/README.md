@@ -2,7 +2,7 @@
 
 A **teacher-led** platform for closing the feedback loop. The learner and tutor interface is a responsive Kanban board; the quality-assurance interface is a separate aggregate reporting dashboard.
 
-**Never use this demo with real student data.** The current authentication deliberately uses switchable synthetic identities. It is NOT secure authentication and must never be deployed to the College network or exposed on a public IP. College IT approval, Microsoft Entra ID integration, role mapping, data-protection review, accessibility testing and production database migrations are required first.
+**Developer setup:** The identity switch is available in local mode and is not production authentication. Keep local mode bound to `127.0.0.1`; an Entra ID adapter is available for a separately configured deployment.
 
 ## Principles
 
@@ -18,7 +18,7 @@ A **teacher-led** platform for closing the feedback loop. The learner and tutor 
 - Tutors can select assignment-specific **assessment criteria/rubrics** and write short personal feedback against them.
 - Teachers can create long-term **learner improvement targets**, link feedback from several assignments, then confirm achievement or reopen the target with a written professional judgement. Learners can read their own targets but cannot close them.
 - Individual student boards are private. Admin users have only aggregate reporting in the MVP.
-- Pastoral notes are intentionally **not included** in the prototype. They require a separate restricted permission model, retention rules and safeguarding review before being developed.
+- Pastoral notes are not part of the current feedback or reporting models.
 
 ## Run locally
 
@@ -38,7 +38,7 @@ $env:FEEDBACK_LOOP_DEMO_MODE="1"
 python -m uvicorn mvp.api:app --host 127.0.0.1 --port 8000
 ~~~
 
-Open <http://127.0.0.1:8000>. The app seeds two different fictional computing cohorts with tutors, learners, sample rubrics, a long-term improvement target and a QA administrator. Identity switching is for demonstration only. The SQLite file \`feedback_loop_mvp.db\` is local and must not be committed. For schema changes in the synthetic demo, delete the demo database file to regenerate it; this is **not** a production migration strategy.
+Open <http://127.0.0.1:8000>. The local development environment starts with two computing cohorts, tutors, learners, rubrics, long-term targets and a QA administrator. Switch views using the selector. The SQLite file `feedback_loop_mvp.db` is local and must not be committed. For development schema changes, reset the local database as needed; any deployed database requires reviewed migrations.
 
 ## Tests
 
@@ -49,7 +49,21 @@ node --check mvp/web/app.js
 
 Read [cohort, rubric and long-term target architecture](docs/learning-foundations.md) for the data model, teacher workflows and access rules.
 
-Read [College integration and release gates](docs/college-integration.md) before attempting any Entra ID configuration. **Sign-in is disabled by default;** Entra requires approved tenant configuration, app roles and an offline mapping to already-enrolled local users. That login scaffold has not been tested against the live College tenant.
+## Architecture and design patterns
+
+See **[State Machine, Observer and CQRS-style read models](docs/design-patterns.md)** for the diagram, transition table and SOLID rationale.
+
+The quality reporting projection can now be **checked and repaired independently of the dashboard**, with restricted operator permissions and audit records. See the [reconciliation runbook](docs/reconciliation.md) (issue #23).
+
+- `mvp/workflow.py` centrally controls valid learner/tutor state transitions. Only a tutor may close feedback.
+- `mvp/events.py` publishes typed changes to independent, synchronous audit and reporting observers.
+- `mvp/reporting.py` maintains aggregate counters in the same database transaction; the QA dashboard reads counters without scanning individual feedback each time.
+- `mvp_domain_events` records structured workflow provenance, including explicit tutor approval of closure.
+- These improvements retain the existing browser interface and do **not** introduce full event sourcing, external messaging or automatic feedback writing.
+
+The `mvp_report_counters` and `mvp_domain_events` tables are created automatically for local development; an existing database is backfilled once. Use reviewed migrations for deployment.
+
+Read [Microsoft integration setup](docs/college-integration.md) before configuring Entra ID. Authentication is disabled by default unless development mode or Entra ID is explicitly selected.
 
 The previous teaching prototype remains on branch \`archive/teaching-prototype-2025\`, with its source still on the original \`master\` until this work is reviewed.
 
@@ -69,4 +83,4 @@ Live College authentication and a **verified, IT-managed roster** (although an o
 
 ## Learner QA
 
-Start with a supervised computing learner and tutor usability session using **synthetic data**. Collect clarity, accessibility, mobile and feedback-loop progression findings without posting student-identifiable information to GitHub.
+Use the [learner and tutor QA guide](docs/qa-pilot.md) to review accessibility, clarity, mobile layout and feedback-loop progression.

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import hashlib
-from collections import Counter, defaultdict
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -20,14 +20,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, create_engine, select
 from sqlalchemy.exc import IntegrityError
 from .entra import EntraConfig, configure_entra_routes, session_identity, verify_csrf
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
+from .base import Base
+from .events import (FEEDBACK_CREATED, FEEDBACK_STATUS_CHANGED, FeedbackChanged, FeedbackEventPublisher)
+from .reporting import AggregateReportReadModel, ReportProjectionObserver
+from .reconciliation import ReportReconciliationService
+from .workflow import (ACTION_REQUIRED, IN_PROGRESS, READY_FOR_REVIEW, CLOSED, INFORMATION,
+                       FeedbackStateMachine, TransitionRejected)
 
 WEB = Path(__file__).parent / "web"
-ACTION_REQUIRED = "ACTION_REQUIRED"
-IN_PROGRESS = "IN_PROGRESS"
-READY_FOR_REVIEW = "READY_FOR_REVIEW"
-CLOSED = "CLOSED"
-INFORMATION = "INFORMATION"
 MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
 EVIDENCE_TYPES = {".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".txt": "text/plain"}
 
@@ -40,10 +41,6 @@ def stamp(value: datetime | None) -> str | None:
     if value is None:
         return None
     return value.isoformat() + ("Z" if value.tzinfo is None else "")
-
-
-class Base(DeclarativeBase):
-    pass
 
 
 class User(Base):
@@ -172,6 +169,38 @@ class Event(Base):
 
 
 
+class StructuredFeedbackEvent(Base):
+    """Append-only structured workflow log, written with the feedback transaction."""
+    __tablename__ = "mvp_domain_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    feedback_id: Mapped[int] = mapped_column(ForeignKey("mvp_feedback.id"))
+    actor_id: Mapped[str] = mapped_column(ForeignKey("mvp_users.id"))
+    event_type: Mapped[str] = mapped_column(String(40))
+    previous_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    status: Mapped[str] = mapped_column(String(30))
+    feedback_required: Mapped[bool] = mapped_column(Boolean)
+    focus_tag: Mapped[str] = mapped_column(String(50))
+    tutor_approved: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+def audit_feedback_change(db: Session, change: FeedbackChanged) -> None:
+    """Observer 1: durable, structured record and existing human-readable timeline."""
+    db.add(StructuredFeedbackEvent(
+        feedback_id=change.feedback_id, actor_id=change.actor_id,
+        event_type=change.event_type, previous_status=change.previous_status,
+        status=change.status, feedback_required=change.feedback_required,
+        focus_tag=change.focus_tag, tutor_approved=change.tutor_approved,
+    ))
+    if change.event_type == FEEDBACK_CREATED:
+        message = "Tutor shared feedback (Teams handoff confirmed)"
+    elif change.tutor_approved:
+        message = f"Tutor approved and CLOSED feedback loop from {change.previous_status}"
+    else:
+        message = f"Moved from {change.previous_status} to {change.status}"
+    db.add(Event(feedback_id=change.feedback_id, actor_id=change.actor_id, description=message))
+
+
 class TeamsHandoff(Base):
     """Manually attested initial feedback in Teams, never an automatic Graph sync."""
     __tablename__ = "mvp_teams_handoffs"
@@ -271,7 +300,7 @@ class TargetDecision(BaseModel):
 
 
 class StatusChange(BaseModel):
-    status: Literal["ACTION_REQUIRED", "IN_PROGRESS", "READY_FOR_REVIEW", "CLOSED"]
+    status: Literal["ACTION_REQUIRED", "IN_PROGRESS", "READY_FOR_REVIEW", "CLOSED", "INFORMATION"]
     progress_note: str = Field(default="", max_length=2000)
 
 
@@ -304,6 +333,14 @@ def is_authorised_assignment(db: Session, assignment_id: str, actor: User, cohor
             CohortAssignment.cohort_id == cohort_id,
             CohortAssignment.assignment_id == assignment_id)) is not None
     )
+
+
+class ReportCheckCommand(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class ReportRepairCommand(ReportCheckCommand):
+    confirmation: Literal["REBUILD_REPORT_COUNTERS"]
 
 
 def seed_demo(db: Session) -> None:
@@ -391,10 +428,17 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
     engine = create_engine(url, connect_args={"check_same_thread": False} if url.startswith("sqlite") else {})
     sessions = sessionmaker(engine, expire_on_commit=False)
     Base.metadata.create_all(engine)
-    if is_demo and seed:
-        with sessions() as db:
+    read_model = AggregateReportReadModel()
+    with sessions() as db:
+        if is_demo and seed:
             seed_demo(db)
+        # One-time backfill for existing demo databases, not a per-request scan.
+        read_model.ensure_initialized(db, Feedback)
+        db.commit()
 
+    machine = FeedbackStateMachine()
+    reconciler = ReportReconciliationService(read_model)
+    publisher = FeedbackEventPublisher(audit_feedback_change, ReportProjectionObserver())
     app = FastAPI(title="Feedback Loop — Local MVP", version="0.1.0")
     app.mount("/assets", StaticFiles(directory=WEB), name="assets")
     if entra_config:
@@ -440,6 +484,8 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             raise HTTPException(404, "Feedback not found.")
         if person.role == "admin":
             raise HTTPException(403, "Admin reports are aggregate only.")
+        if person.role not in ("learner", "tutor"):
+            raise HTTPException(403, "Feedback access is not permitted for this role.")
         if thread.cohort_id not in cohort_ids(db, person):
             raise HTTPException(404, "Feedback not found.")
         return thread
@@ -673,6 +719,8 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
     def list_threads(person: User = Depends(actor), db: Session = Depends(database)):
         if person.role == "admin":
             raise HTTPException(403, "Use aggregate reports.")
+        if person.role not in ("learner", "tutor"):
+            raise HTTPException(403, "Feedback access is not permitted for this role.")
         condition = Feedback.learner_id == person.id if person.role == "learner" else Feedback.tutor_id == person.id
         threads = db.scalars(select(Feedback).where(
             condition, Feedback.cohort_id.in_(cohort_ids(db, person))
@@ -764,8 +812,11 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         ))
         if target is not None:
             db.add(TargetLink(target_id=target.id, feedback_id=thread.id))
-        db.add(Event(feedback_id=thread.id, actor_id=person.id,
-                     description="Tutor confirmed initial feedback in Teams and shared an action"))
+        publisher.publish(db, FeedbackChanged(
+            event_type=FEEDBACK_CREATED, feedback_id=thread.id, actor_id=person.id,
+            previous_status=None, status=thread.status, feedback_required=thread.feedback_required,
+            focus_tag=thread.focus_tag,
+        ))
         try:
             db.commit()
         except IntegrityError as exc:
@@ -776,29 +827,28 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
     @app.post("/api/threads/{fid}/status")
     def change_status(fid: int, payload: StatusChange, person: User = Depends(actor), db: Session = Depends(database)):
         thread = accessible(db, person, fid)
-        current, target = thread.status, payload.status
-        if person.role == "learner":
-            allowed = {(ACTION_REQUIRED, IN_PROGRESS), (IN_PROGRESS, READY_FOR_REVIEW),
-                       (READY_FOR_REVIEW, IN_PROGRESS), (IN_PROGRESS, ACTION_REQUIRED)}
-            if not thread.feedback_required or (current, target) not in allowed:
-                raise HTTPException(403, "Learners can progress work but cannot close it.")
-            if target == READY_FOR_REVIEW and not payload.progress_note.strip():
-                raise HTTPException(422, "Explain what you changed before requesting review.")
-        elif person.role == "tutor":
-            allowed = {(READY_FOR_REVIEW, CLOSED), (INFORMATION, CLOSED),
-                       (READY_FOR_REVIEW, IN_PROGRESS), (CLOSED, ACTION_REQUIRED),
-                       (ACTION_REQUIRED, IN_PROGRESS), (IN_PROGRESS, READY_FOR_REVIEW)}
-            if (current, target) not in allowed:
-                raise HTTPException(409, "That tutor transition is not permitted.")
-        else:
-            raise HTTPException(403, "Only tutors and learners can update work.")
-        thread.status = target
+        try:
+            decision = machine.decide(
+                current=thread.status, target=payload.status, actor_role=person.role,
+                feedback_required=thread.feedback_required, progress_note=payload.progress_note,
+            )
+        except TransitionRejected as exc:
+            raise HTTPException(exc.code, str(exc)) from exc
+
+        # Apply the approved transition and publish both audit and report
+        # observations inside the same transaction; any failure rolls back all.
+        thread.status = decision.target
         thread.updated_at = utcnow()
-        thread.closed_at = utcnow() if target == CLOSED else None
-        if person.role == "learner" and target == READY_FOR_REVIEW:
+        thread.closed_at = utcnow() if decision.tutor_approved else None
+        if decision.progress_note:
             db.add(Note(feedback_id=fid, author_id=person.id,
-                        body="Work submitted for review: " + payload.progress_note.strip()))
-        db.add(Event(feedback_id=fid, actor_id=person.id, description=f"Moved from {current} to {target}"))
+                        body="Work submitted for review: " + decision.progress_note))
+        publisher.publish(db, FeedbackChanged(
+            event_type=FEEDBACK_STATUS_CHANGED, feedback_id=fid, actor_id=person.id,
+            previous_status=decision.previous, status=decision.target,
+            feedback_required=thread.feedback_required, focus_tag=thread.focus_tag,
+            tutor_approved=decision.tutor_approved,
+        ))
         db.commit()
         return summarise(db, thread)
 
@@ -883,22 +933,39 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         return {"recurring": recurring,
                 "note": "Tutor-authored focus tags only; review context with the learner."}
 
+    @app.post("/api/reports/reconcile")
+    def reconcile_reports(payload: ReportCheckCommand, person: User = Depends(actor),
+                          db: Session = Depends(database)):
+        if person.role != "admin":
+            raise HTTPException(403, "Quality administrator role required.")
+        try:
+            result = reconciler.run(db, Feedback, actor_id=person.id, reason=payload.reason)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        db.commit()
+        return result
+
+    @app.post("/api/reports/reconcile/repair")
+    def repair_reports(payload: ReportRepairCommand, person: User = Depends(actor),
+                       db: Session = Depends(database)):
+        if person.role != "admin":
+            raise HTTPException(403, "Quality administrator role required.")
+        allowed_ids = {id.strip() for id in os.getenv("FEEDBACK_LOOP_REPORT_REPAIR_USERS", "").split(",") if id.strip()}
+        if person.id not in allowed_ids:
+            raise HTTPException(403, "Reporting repair permission is not configured for this account.")
+        try:
+            result = reconciler.run(db, Feedback, actor_id=person.id,
+                                    reason=payload.reason, repair=True)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        db.commit()
+        return result
+
     @app.get("/api/reports")
     def reports(person: User = Depends(actor), db: Session = Depends(database)):
         if person.role != "admin":
             raise HTTPException(403, "Administrator role required.")
-        threads = db.scalars(select(Feedback)).all()
-        states = Counter(t.status for t in threads)
-        tags = Counter(t.focus_tag for t in threads if t.focus_tag)
-        return {
-            "total": len(threads), "actions_required": sum(t.feedback_required for t in threads),
-            "closed": states[CLOSED],
-            "awaiting_review": states[READY_FOR_REVIEW],
-            "by_status": [{"status": key, "count": states[key]} for key in
-                          (ACTION_REQUIRED, IN_PROGRESS, READY_FOR_REVIEW, CLOSED, INFORMATION)],
-            "focus_areas": [{"name": key, "count": count} for key, count in tags.most_common()],
-            "note": "Synthetic demonstration data. Aggregate reporting only; no pastoral notes.",
-        }
+        return read_model.snapshot(db)
 
     return app
 

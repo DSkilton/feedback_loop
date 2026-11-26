@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from mvp.tests.helpers import versioned_status_post
 from mvp.api import Feedback, create_app
 from mvp.events import FEEDBACK_CREATED, FEEDBACK_STATUS_CHANGED, FeedbackChanged
 from mvp.reporting import AggregateReportReadModel
@@ -42,17 +43,17 @@ def test_information_only_reopens_as_information_without_assigning_student_work(
     identity(client, "tutor-1")
     baseline = counts(client)
     identity(client, "tutor-1")
-    assert client.post("/api/threads/6/status", json={"status": "CLOSED"}).status_code == 200
-    assert client.post("/api/threads/6/status", json={"status": "ACTION_REQUIRED"}).status_code == 409
-    response = client.post("/api/threads/6/status", json={"status": "INFORMATION"})
+    assert versioned_status_post(client, "/api/threads/6/status", json={"status": "CLOSED"}).status_code == 200
+    assert versioned_status_post(client, "/api/threads/6/status", json={"status": "ACTION_REQUIRED"}).status_code == 409
+    response = versioned_status_post(client, "/api/threads/6/status", json={"status": "INFORMATION"})
     assert response.status_code == 200
     assert response.json()["status"] == "INFORMATION"
     assert response.json()["feedback_required"] is False
     assert response.json()["closed_at"] is None
 
     identity(client, "learner-2")
-    assert client.post("/api/threads/6/status", json={"status": "IN_PROGRESS"}).status_code == 403
-    assert client.post("/api/threads/6/status", json={"status": "READY_FOR_REVIEW",
+    assert versioned_status_post(client, "/api/threads/6/status", json={"status": "IN_PROGRESS"}).status_code == 403
+    assert versioned_status_post(client, "/api/threads/6/status", json={"status": "READY_FOR_REVIEW",
         "progress_note": "I edited the assignment."}).status_code == 403
     assert client.get("/api/threads/6").json()["status"] == "INFORMATION"
 
@@ -67,11 +68,11 @@ def test_information_only_reopens_as_information_without_assigning_student_work(
 def test_actionable_feedback_reopens_only_to_action_required(project):
     client, _ = project
     identity(client, "tutor-1")
-    assert client.post("/api/threads/3/status", json={"status": "CLOSED"}).status_code == 200
-    assert client.post("/api/threads/3/status", json={"status": "INFORMATION"}).status_code == 409
-    assert client.post("/api/threads/3/status", json={"status": "ACTION_REQUIRED"}).status_code == 200
+    assert versioned_status_post(client, "/api/threads/3/status", json={"status": "CLOSED"}).status_code == 200
+    assert versioned_status_post(client, "/api/threads/3/status", json={"status": "INFORMATION"}).status_code == 409
+    assert versioned_status_post(client, "/api/threads/3/status", json={"status": "ACTION_REQUIRED"}).status_code == 200
     identity(client, "learner-1")
-    assert client.post("/api/threads/3/status", json={"status": "IN_PROGRESS"}).status_code == 200
+    assert versioned_status_post(client, "/api/threads/3/status", json={"status": "IN_PROGRESS"}).status_code == 200
 
 
 def test_unknown_roles_cannot_access_thread_list_details_or_reporting(project):
@@ -83,7 +84,7 @@ def test_unknown_roles_cannot_access_thread_list_details_or_reporting(project):
     assert client.get("/api/threads").status_code == 403
     assert client.get("/api/threads/1").status_code == 403
     assert client.post("/api/threads/1/comments", json={"body": "Test"}).status_code == 403
-    assert client.post("/api/threads/1/status", json={"status": "CLOSED"}).status_code == 403
+    assert versioned_status_post(client, "/api/threads/1/status", json={"status": "CLOSED"}).status_code == 403
     assert client.get("/api/reports").status_code == 403
 
 
@@ -105,16 +106,16 @@ def test_tutor_assignment_scope_applies_to_read_and_write_endpoints(project):
 
     identity(client, "tutor-1")
     assert client.get(f"/api/threads/{feedback_id}").status_code == 404
-    assert client.post(f"/api/threads/{feedback_id}/status",
+    assert versioned_status_post(client, f"/api/threads/{feedback_id}/status",
                        json={"status": "IN_PROGRESS"}).status_code == 404
     assert client.get(f"/api/threads/{feedback_id}/evidence/1").status_code == 404
 
     identity(client, "tutor-2")
     assert client.get("/api/threads/1").status_code == 404
-    assert client.post("/api/threads/1/status",
+    assert versioned_status_post(client, "/api/threads/1/status",
                        json={"status": "IN_PROGRESS"}).status_code == 404
     assert client.get(f"/api/threads/{feedback_id}").status_code == 200
-    assert client.post(f"/api/threads/{feedback_id}/status",
+    assert versioned_status_post(client, f"/api/threads/{feedback_id}/status",
                        json={"status": "IN_PROGRESS"}).status_code == 200
 
 
@@ -144,7 +145,7 @@ def test_duplicate_teams_submission_does_not_change_projection_or_audit(project)
 def test_evidence_limit_does_not_append_extra_audit_events(project):
     client, path = project
     identity(client, "learner-1")
-    assert client.post("/api/threads/1/status", json={"status": "IN_PROGRESS"}).status_code == 200
+    assert versioned_status_post(client, "/api/threads/1/status", json={"status": "IN_PROGRESS"}).status_code == 200
     for i in range(5):
         response = client.post("/api/threads/1/evidence", files={
             "file": (f"evidence-{i}.txt", b"Updated setter tests.", "text/plain")
@@ -165,7 +166,7 @@ def test_evidence_limit_does_not_append_extra_audit_events(project):
 def test_evidence_ids_cannot_be_reused_on_unrelated_threads(project):
     client, _ = project
     identity(client, "learner-1")
-    client.post("/api/threads/1/status", json={"status": "IN_PROGRESS"})
+    versioned_status_post(client, "/api/threads/1/status", json={"status": "IN_PROGRESS"})
     result = client.post("/api/threads/1/evidence", files={
         "file": ("proof.txt", b"New evidence", "text/plain")
     })
@@ -180,7 +181,7 @@ def test_evidence_ids_cannot_be_reused_on_unrelated_threads(project):
 def test_projection_rebuild_is_repeatable_and_restores_correct_counts(project):
     client, path = project
     identity(client, "tutor-1")
-    assert client.post("/api/threads/3/status", json={"status": "CLOSED"}).status_code == 200
+    assert versioned_status_post(client, "/api/threads/3/status", json={"status": "CLOSED"}).status_code == 200
     expected = counts(client)
     with sqlite3.connect(path) as connection:
         connection.execute("update mvp_report_counters set value=99 where key='total'")

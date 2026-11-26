@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import os
 import hashlib
+import json
+from uuid import UUID
+from urllib.parse import urlparse
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,8 +19,8 @@ from typing import Literal
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, create_engine, select
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, create_engine, select, update
 from sqlalchemy.exc import IntegrityError
 from .entra import EntraConfig, configure_entra_routes, session_identity, verify_csrf
 from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
@@ -31,6 +34,27 @@ from .workflow import (ACTION_REQUIRED, IN_PROGRESS, READY_FOR_REVIEW, CLOSED, I
 WEB = Path(__file__).parent / "web"
 MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
 EVIDENCE_TYPES = {".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".txt": "text/plain"}
+FeedbackJudgement = Literal["requires_improvement", "satisfactory", "good", "very_good", "excellent"]
+JUDGEMENT_LABELS = {
+    "requires_improvement": "Requires improvement",
+    "satisfactory": "Satisfactory",
+    "good": "Good",
+    "very_good": "Very good",
+    "excellent": "Excellent",
+}
+
+def validated_work_url(value: str) -> str:
+    if not value:
+        return ""
+    parsed = urlparse(value)
+    domain = (parsed.hostname or "").lower()
+    domains = ("teams.microsoft.com", "teams.cloud.microsoft", "microsoft365.com")
+    if parsed.scheme != "https" or parsed.username or parsed.password or not (
+        domain in domains or domain.endswith(".sharepoint.com")
+    ):
+        raise ValueError("Use an HTTPS Teams or SharePoint work link.")
+    return value
+
 
 
 def utcnow() -> datetime:
@@ -145,9 +169,33 @@ class Feedback(Base):
     teams_reference: Mapped[str] = mapped_column(String(200))
     feedback_required: Mapped[bool] = mapped_column(Boolean, default=True)
     status: Mapped[str] = mapped_column(String(30), default=ACTION_REQUIRED)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    judgement: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    work_url: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class FeedbackReview(Base):
+    __tablename__ = "mvp_feedback_reviews"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    feedback_id: Mapped[int] = mapped_column(ForeignKey("mvp_feedback.id"))
+    tutor_id: Mapped[str] = mapped_column(ForeignKey("mvp_users.id"))
+    judgement: Mapped[str] = mapped_column(String(30))
+    decision_note: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class FeedbackSubmission(Base):
+    __tablename__ = "mvp_feedback_submissions"
+    __table_args__ = (UniqueConstraint("tutor_id", "client_key", name="uq_mvp_feedback_client_key"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tutor_id: Mapped[str] = mapped_column(ForeignKey("mvp_users.id"))
+    client_key: Mapped[str] = mapped_column(String(36))
+    payload_digest: Mapped[str] = mapped_column(String(64))
+    feedback_id: Mapped[int] = mapped_column(ForeignKey("mvp_feedback.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class Note(Base):
@@ -274,7 +322,22 @@ class NewFeedback(BaseModel):
     teams_assignment_id: str = Field(default="", max_length=100)
     teams_submission_id: str = Field(default="", max_length=100)
     feedback_required: bool = True
+    judgement: FeedbackJudgement | None = None
+    work_url: str = Field(default="", max_length=500)
+    client_key: UUID | None = None
 
+    @field_validator("work_url")
+    @classmethod
+    def check_work_url(cls, value: str) -> str:
+        return validated_work_url(value.strip())
+
+
+class BulkFeedbackItem(NewFeedback):
+    client_key: UUID
+
+
+class BulkFeedbackRequest(BaseModel):
+    items: list[BulkFeedbackItem] = Field(min_length=1, max_length=60)
 
 
 class NewCriterion(BaseModel):
@@ -301,7 +364,10 @@ class TargetDecision(BaseModel):
 
 class StatusChange(BaseModel):
     status: Literal["ACTION_REQUIRED", "IN_PROGRESS", "READY_FOR_REVIEW", "CLOSED", "INFORMATION"]
+    expected_version: int = Field(ge=1)
     progress_note: str = Field(default="", max_length=2000)
+    judgement: FeedbackJudgement | None = None
+    review_note: str = Field(default="", max_length=2000)
 
 
 class NewComment(BaseModel):
@@ -501,6 +567,7 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             "cohort_name": db.get(Cohort, thread.cohort_id).name if thread.cohort_id else None,
             "feedback_text": thread.feedback_text,
             "next_step": thread.next_step, "focus_tag": thread.focus_tag,
+            "judgement": thread.judgement, "work_url": thread.work_url, "version": thread.version,
             "teams_reference": thread.teams_reference, "feedback_required": thread.feedback_required,
             "status": thread.status, "updated_at": stamp(thread.updated_at), "closed_at": stamp(thread.closed_at),
         }
@@ -732,8 +799,10 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         thread = accessible(db, person, fid)
         handoff = db.scalar(select(TeamsHandoff).where(TeamsHandoff.feedback_id == fid))
         evidence = db.scalars(select(Evidence).where(Evidence.feedback_id == fid).order_by(Evidence.created_at)).all()
+        reviews = db.scalars(select(FeedbackReview).where(FeedbackReview.feedback_id == fid).order_by(FeedbackReview.id)).all()
         return {
             **summarise(db, thread), "timeline": timeline(db, fid),
+            "reviews": [{"judgement": r.judgement, "note": r.decision_note, "at": stamp(r.created_at)} for r in reviews],
             "teams_handoff": {
                 "confirmed_at": stamp(handoff.confirmed_at),
                 "teams_class_id": handoff.teams_class_id,

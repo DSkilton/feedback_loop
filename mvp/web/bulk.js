@@ -9,7 +9,7 @@ class BulkFeedbackView {
     this.submitting = false;
     this.justSaved = new Set();
     this.storageError = "";
-    this.feedbackRequired = false;
+    this.resultMessage = "Only entered rows will be published. Unconfirmed submissions remain in this browser.";
   }
 
   scope() {
@@ -51,6 +51,7 @@ class BulkFeedbackView {
   async load() {
     this.rows = new Map();
     this.justSaved.clear();
+    this.resultMessage = "Only entered rows will be published. Unconfirmed submissions remain in this browser.";
     this.context = this.scope() + "|" + this.cohortId + "|" + this.assignmentId;
     this.global = { teams_reference: "", teams_recorded_confirmed: false, feedback_required: false, criterion_id: "" };
     try {
@@ -143,7 +144,7 @@ class BulkFeedbackView {
       '</section><p id="draftStatus" role="status" class="bulk-save-status">' + html(this.storageError ? "Local save unavailable: " + this.storageError : "Drafts saved only in this browser") + '</p>' +
       '<div class="bulk-table-wrap"><table class="bulk-table"><thead><tr><th scope="col">Learner</th><th scope="col">Teacher feedback</th><th scope="col">Judgement</th><th scope="col">Work link / next step</th></tr></thead><tbody>' +
       this.learners().map((learner) => this.renderRow(learner)).join("") + '</tbody></table></div>' +
-      '<div class="bulk-footer"><p id="bulkResult" role="status" aria-live="polite">Only entered rows will be published. Unconfirmed submissions remain in this browser.</p>' +
+      '<div class="bulk-footer"><p id="bulkResult" role="status" aria-live="polite">' + html(this.resultMessage) + '</p>' +
       '<button id="bulkSubmit" type="submit" class="button-primary">Submit populated feedback</button></div></form>';
     this.attach();
   }
@@ -234,6 +235,7 @@ class BulkFeedbackView {
 
   async submit() {
     if (this.submitting) return;
+    if (this.storageError) return this.setStatus("Offline draft storage is unavailable; cannot safely submit: " + this.storageError);
     const rows = this.selectedRows();
     if (!rows.length) return this.setStatus("Enter feedback for at least one learner.");
     if (!this.global.teams_recorded_confirmed || this.global.teams_reference.trim().length < 3) {
@@ -253,6 +255,7 @@ class BulkFeedbackView {
       await this.flush();
     } catch (_) {
       this.submitting = false;
+      this.paint();
       return;
     }
     this.paint();
@@ -275,11 +278,9 @@ class BulkFeedbackView {
         }
       }
       await this.flush();
-      this.setStatus(response.saved + " published · " + response.failed + " still need attention");
-      $("bulkResult").textContent = response.failed ? "Check the affected rows, then submit again." : "Feedback published. All acknowledged drafts have been cleared.";
+      this.resultMessage = response.saved + " published · " + response.failed + " still need attention. " + (response.failed ? "Correct failed rows and submit again." : "All acknowledged local drafts have been cleared.");
     } catch (error) {
-      this.setStatus("Connection uncertain. Your drafts remain saved locally; retry to verify before editing.");
-      $("bulkResult").textContent = "No confirmation received: " + error.message + ". Retry with the same submission keys.";
+      this.resultMessage = "Connection uncertain. Your drafts remain saved locally. Submit again to verify the original attempt before editing.";
     } finally {
       this.submitting = false;
       this.paint();

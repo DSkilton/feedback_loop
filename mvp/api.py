@@ -19,7 +19,7 @@ from typing import Literal
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, create_engine, select, update
 from sqlalchemy.exc import IntegrityError
 from .entra import EntraConfig, configure_entra_routes, session_identity, verify_csrf
@@ -338,7 +338,7 @@ class BulkFeedbackItem(NewFeedback):
 
 
 class BulkFeedbackRequest(BaseModel):
-    items: list[BulkFeedbackItem] = Field(min_length=1, max_length=60)
+    items: list[dict] = Field(min_length=1, max_length=60)
 
 
 class NewCriterion(BaseModel):
@@ -924,7 +924,15 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         if person.role != "tutor":
             raise HTTPException(403, "Only tutors can author feedback.")
         results = []
-        for item in payload.items:
+        for raw in payload.items:
+            try:
+                item = BulkFeedbackItem.model_validate(raw)
+            except ValidationError:
+                results.append({
+                    "client_key": str(raw.get("client_key", ""))[:36], "ok": False,
+                    "code": 422, "error": "Feedback row has invalid or missing fields.",
+                })
+                continue
             with sessions() as row_db:
                 try:
                     current_tutor = row_db.get(User, person.id)

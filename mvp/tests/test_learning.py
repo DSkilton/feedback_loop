@@ -5,6 +5,7 @@ Security properties are exercised at the HTTP boundary, not only in UI filters.
 import pytest
 from fastapi.testclient import TestClient
 
+from mvp.tests.helpers import versioned_status_post
 from mvp.api import create_app
 
 
@@ -163,9 +164,9 @@ def test_target_requires_closed_linked_feedback_and_written_tutor_judgement(clie
         "status": "ACHIEVED", "reason": "yes"}).status_code == 422
     # Tutor closes only after learner reaches ready for review.
     as_person(client, "learner-1")
-    assert client.post("/api/threads/3/status", json={"status": "CLOSED"}).status_code == 403
+    assert versioned_status_post(client, "/api/threads/3/status", json={"status": "CLOSED"}).status_code == 403
     as_person(client, "tutor-1")
-    assert client.post("/api/threads/3/status", json={"status": "CLOSED"}).status_code == 200
+    assert versioned_status_post(client, "/api/threads/3/status", json={"status": "CLOSED"}).status_code == 200
     reviewed = client.post(f"/api/targets/{tid}/status", json={
         "status": "ACHIEVED", "reason": "Evidence independently demonstrates improvement."})
     assert reviewed.status_code == 200

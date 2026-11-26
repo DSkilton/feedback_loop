@@ -49,8 +49,9 @@ describe("Teacher feedback journeys", () => {
       .then((response) => { cy.wrap(response.body.length).as("afterUnknown"); });
     cy.reload();
     cy.get("#bulkNav").click();
+    cy.get('[data-learner="learner-1"] [data-field="feedback_text"]').should("be.disabled");
     cy.get('[data-learner="learner-1"] [data-field="feedback_text"]')
-      .should("contain.value", "must remain recoverable").and("be.disabled");
+      .invoke("val").should("include", "must remain recoverable");
     cy.get("#bulkSubmit").click();
     cy.get("#bulkResult").should("contain", "1 published");
     cy.get("@afterUnknown").then((count) => {

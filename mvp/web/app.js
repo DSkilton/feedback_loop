@@ -75,6 +75,7 @@ function updateNavigation() {
   $("notificationsNav").hidden = !state.bootstrap;
   $("oversightNav").hidden = !state.bootstrap?.can_view_oversight;
   $("organisationNav").hidden = !state.bootstrap?.can_manage_organisation;
+  $("rosterNav").hidden = !state.bootstrap?.can_manage_organisation;
   $("boardNav").hidden = admin;
   $("bulkNav").hidden = admin || state.bootstrap?.user.role !== "tutor";
   document.querySelectorAll("[data-page]").forEach((button) => button.classList.toggle("active", button.dataset.page === state.page));
@@ -299,6 +300,7 @@ async function render() {
   else if (state.page === "oversight") await window.organisation.renderOversight();
   else if (state.page === "organisation") await window.organisation.renderConfiguration();
   else if (state.page === "notifications") await window.notifications.render();
+  else if (state.page === "rosters") window.rosterImport.render();
   else {
     renderBoard();
     if (state.bootstrap.user.role === "tutor") await renderTutorFocus();

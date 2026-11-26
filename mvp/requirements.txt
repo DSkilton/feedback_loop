@@ -8,3 +8,5 @@ pytest-cov>=5,<8
 authlib>=1.5,<2
 itsdangerous>=2.2,<3
 python-multipart>=0.0.20,<1
+openpyxl>=3.1,<4
+defusedxml>=0.7,<1

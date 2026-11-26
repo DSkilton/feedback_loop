@@ -46,7 +46,9 @@ async function api(path, options = {}) {
   });
   if (!response.ok) {
     const problem = await response.json().catch(() => ({}));
-    throw new Error(typeof problem.detail === "string" ? problem.detail : "Request failed");
+    const error = new Error(typeof problem.detail === "string" ? problem.detail : "Request failed");
+    error.status = response.status;
+    throw error;
   }
   return response.json();
 }
@@ -70,6 +72,7 @@ function updateNavigation() {
   const admin = state.bootstrap?.user.role === "admin";
   $("reportsNav").hidden = !admin;
   $("boardNav").hidden = admin;
+  $("bulkNav").hidden = admin || state.bootstrap?.user.role !== "tutor";
   document.querySelectorAll("[data-page]").forEach((button) => button.classList.toggle("active", button.dataset.page === state.page));
 }
 function filterThreads() {
@@ -288,6 +291,7 @@ async function renderTutorFocus() {
 }
 async function render() {
   if (state.page === "reports") await renderReports();
+  else if (state.page === "bulk") await window.bulkFeedback.render();
   else {
     renderBoard();
     if (state.bootstrap.user.role === "tutor") await renderTutorFocus();
@@ -339,6 +343,18 @@ function teamsReference(value) {
   } catch (_) { /* A teacher may provide a non-URL assignment reference. */ }
   return '<span>' + escapeHtml(value) + '</span>';
 }
+function reviewEditor(thread) {
+  if (state.bootstrap.user.role !== "tutor" || thread.status !== "READY_FOR_REVIEW" || !thread.feedback_required) return "";
+  const options = [
+    ["", "Select judgement"], ["requires_improvement", "Requires improvement"],
+    ["satisfactory", "Satisfactory"], ["good", "Good"], ["very_good", "Very good"],
+    ["excellent", "Excellent"],
+  ];
+  return '<section class="teacher-review"><h3>Teacher review decision</h3>' +
+    '<label>Judgement<select id="reviewJudgement">' + options.map(([key, label]) =>
+      '<option value="' + key + '">' + label + '</option>').join("") + '</select></label>' +
+    '<label>Specific feedback<textarea id="reviewNote" maxlength="2000" rows="3" placeholder="Explain the learner improvement in your own words"></textarea></label></section>';
+}
 function actionButtons(thread) {
   const isLearner = state.bootstrap.user.role === "learner";
   const targetLabels = [];
@@ -357,13 +373,17 @@ function actionButtons(thread) {
 async function openThread(fid) {
   const t = await api("/api/threads/" + fid);
   state.selected = fid;
+  state.selectedVersion = t.version;
+  state.selectedRequiresAction = t.feedback_required;
   $("detailTitle").textContent = t.assignment;
   $("threadDetail").innerHTML =
     '<div class="detail-overview"><div class="detail-tags"><span class="tag tag-action">' + escapeHtml(labelFor(t.status)) + '</span><span class="tag tag-neutral">' + escapeHtml(t.module) + '</span></div><div class="detail-meta">Learner · ' + escapeHtml(t.learner) +
     ' · Updated ' + niceDate(t.updated_at) + '</div><div class="detail-section"><h3>Teacher feedback</h3>' +
     (t.criterion ? '<div class="criterion">' + escapeHtml(t.criterion) + '</div>' : '') +
-    '<p>' + escapeHtml(t.feedback_text) + '</p></div>' +
+    '<p>' + escapeHtml(t.feedback_text) + '</p>' +
+    (t.judgement ? '<p class="detail-judgement">Judgement: ' + escapeHtml(t.judgement.replace(/_/g, ' ')) + '</p>' : '') + '</div>' +
     (t.feedback_required ? '<div class="detail-next"><span class="step-label">YOUR NEXT STEP</span><p>' + escapeHtml(t.next_step) + '</p></div>' : '<div class="detail-next info"><strong>No action required.</strong> This feedback is shared for information.</div>') +
+    (t.work_url ? '<div class="teams-reference"><strong>Learner work</strong>' + teamsReference(t.work_url) + '</div>' : '') +
     '<div class="teams-reference"><strong>Initial feedback in Teams</strong>' + teamsReference(t.teams_reference) +
     '<small>' + (t.teams_handoff?.confirmed_at ? 'Teacher confirmed recording in Teams · ' + niceDate(t.teams_handoff.confirmed_at) : 'Legacy reference; no confirmed handoff') + '. This is not automatic sync.</small></div></div>' +
     '<section class="evidence-section"><h3>Evidence of improvement</h3>' +
@@ -378,6 +398,7 @@ async function openThread(fid) {
       : '') + '</section>' +
     (state.bootstrap.user.role === "learner" && t.status === "IN_PROGRESS" ?
       '<label class="progress-prompt" for="progressEvidence">What have you changed?<textarea id="progressEvidence" rows="3" maxlength="2000" placeholder="Describe the changes you made and how they address the feedback."></textarea><small>This explanation is saved to your conversation when you submit for review.</small></label>' : '') +
+    reviewEditor(t) + '<div id="detailConflict" role="alert"></div>' +
     '<div class="detail-actions">' + actionButtons(t) + '</div>' +
     '<div class="timeline"><h3>Conversation and progress history</h3>' +
     (t.timeline.length ? t.timeline.map((entry) =>
@@ -406,11 +427,22 @@ async function openThread(fid) {
 async function changeStatus(fid, status) {
   try {
     const progress_note = $("progressEvidence")?.value || "";
-    await api("/api/threads/" + fid + "/status", { method: "POST", body: JSON.stringify({ status, progress_note }) });
+    const payload = { status, progress_note, expected_version: state.selectedVersion };
+    if (status === "CLOSED" && state.selectedRequiresAction) {
+      payload.judgement = $("reviewJudgement")?.value || null;
+      payload.review_note = $("reviewNote")?.value || "";
+    }
+    await api("/api/threads/" + fid + "/status", { method: "POST", body: JSON.stringify(payload) });
     $("threadDialog").close();
     await refresh();
     notify("Progress updated");
-  } catch (error) { notify(error.message); }
+  } catch (error) {
+    if (error.status === 409) {
+      const conflict = $("detailConflict");
+      if (conflict) conflict.textContent = "This feedback changed in another tab. Copy any unsent text, then reopen the record before trying again.";
+    }
+    notify(error.message);
+  }
 }
 $("entraLogout").addEventListener("click", async () => {
   try {
@@ -419,6 +451,7 @@ $("entraLogout").addEventListener("click", async () => {
   } catch (error) { notify(error.message); }
 });
 $("identitySelect").addEventListener("change", async (event) => {
+  if (state.page === "bulk") await window.bulkFeedback.flush();
   state.identity = event.target.value;
   state.learnerFilter = "all";
   state.cohortFilter = "all";
@@ -427,6 +460,14 @@ $("identitySelect").addEventListener("change", async (event) => {
   await refresh();
 });
 document.addEventListener("click", async (event) => {
+  const page = event.target.closest("[data-page]");
+  if (page) {
+    if (state.page === "bulk") await window.bulkFeedback.flush();
+    state.page = page.dataset.page;
+    updateNavigation();
+    await render();
+    return;
+  }
   const close = event.target.closest("[data-close]");
   if (close) { $(close.dataset.close).close(); return; }
   const open = event.target.closest("[data-open]");

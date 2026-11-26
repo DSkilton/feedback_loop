@@ -27,6 +27,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
 from .base import Base
 from .organisation import OversightScope, can_manage_organisation, register_organisation_routes
 from .notifications import FeedbackNotificationObserver, register_notification_routes
+from .rosters import register_roster_routes
 from .events import (FEEDBACK_CREATED, FEEDBACK_STATUS_CHANGED, FeedbackChanged, FeedbackEventPublisher)
 from .reporting import AggregateReportReadModel, ReportProjectionObserver
 from .reconciliation import ReportReconciliationService
@@ -548,6 +549,7 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
     oversight_scope = OversightScope()
     register_organisation_routes(app, database, actor, User, Course, is_demo)
     register_notification_routes(app, database, actor, Feedback, Enrollment)
+    register_roster_routes(app, database, actor, User, Course, Cohort, Enrollment, is_demo)
 
     def accessible(db: Session, person: User, feedback_id: int) -> Feedback:
         thread = db.get(Feedback, feedback_id)

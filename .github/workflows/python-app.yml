@@ -29,6 +29,7 @@ jobs:
           node --check mvp/web/app.js
           node --check mvp/web/bulk.js
           node --check mvp/web/draft-store.js
+          node --check mvp/web/organisation.js
 
   browser:
     needs: test

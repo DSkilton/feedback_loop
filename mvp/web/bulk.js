@@ -35,6 +35,10 @@ class BulkFeedbackView {
 
   async render() {
     if (state.bootstrap?.user?.role !== "tutor") return;
+    if (state.mode !== "demo") {
+      $("app").innerHTML = '<section class="page-heading"><h1>Class feedback</h1><p>Browser draft storage requires College approval before use with real learner data.</p></section>';
+      return;
+    }
     const cohorts = state.bootstrap.cohorts;
     if (!cohorts.length) {
       $("app").innerHTML = '<section class="page-heading"><h1>Class feedback</h1><p>No teaching cohorts are assigned to your account.</p></section>';
@@ -233,6 +237,16 @@ class BulkFeedbackView {
     };
   }
 
+  validWorkUrl(value) {
+    if (!value) return true;
+    try {
+      const parsed = new URL(value);
+      const domain = parsed.hostname.toLowerCase();
+      return parsed.protocol === "https:" && !parsed.username && !parsed.password &&
+        (["teams.microsoft.com", "teams.cloud.microsoft", "microsoft365.com"].includes(domain) || domain.endsWith(".sharepoint.com"));
+    } catch (_) { return false; }
+  }
+
   async submit() {
     if (this.submitting) return;
     if (this.storageError) return this.setStatus("Offline draft storage is unavailable; cannot safely submit: " + this.storageError);
@@ -244,6 +258,9 @@ class BulkFeedbackView {
     const items = rows.map((row) => row.submission || this.buildItem(row));
     if (items.some((item) => !item.feedback_text || (item.feedback_required && !item.next_step))) {
       return this.setStatus("Each populated row needs feedback and, if required, a next step.");
+    }
+    if (items.some((item) => !this.validWorkUrl(item.work_url))) {
+      return this.setStatus("Work links must be HTTPS Teams or SharePoint URLs.");
     }
     this.submitting = true;
     for (const [i, row] of rows.entries()) {
@@ -280,7 +297,18 @@ class BulkFeedbackView {
       await this.flush();
       this.resultMessage = response.saved + " published · " + response.failed + " still need attention. " + (response.failed ? "Correct failed rows and submit again." : "All acknowledged local drafts have been cleared.");
     } catch (error) {
-      this.resultMessage = "Connection uncertain. Your drafts remain saved locally. Submit again to verify the original attempt before editing.";
+      if (error.status >= 400 && error.status < 500) {
+        for (const row of rows) {
+          row.uncertain = false;
+          row.submission = null;
+          row.error = error.message;
+          this.scheduleSave(row.key);
+        }
+        await this.flush();
+        this.resultMessage = "Nothing published: " + error.message + ". Correct the feedback and submit again.";
+      } else {
+        this.resultMessage = "Connection uncertain. Your drafts remain saved locally. Submit again to verify the original attempt before editing.";
+      }
     } finally {
       this.submitting = false;
       this.paint();
@@ -289,3 +317,7 @@ class BulkFeedbackView {
 }
 
 window.bulkFeedback = new BulkFeedbackView();
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") window.bulkFeedback.flush().catch(() => {});
+});

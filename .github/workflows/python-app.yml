@@ -30,6 +30,7 @@ jobs:
           node --check mvp/web/bulk.js
           node --check mvp/web/draft-store.js
           node --check mvp/web/organisation.js
+          node --check mvp/web/notifications.js
 
   browser:
     needs: test

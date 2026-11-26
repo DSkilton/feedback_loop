@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import os
 import hashlib
+import json
+from uuid import UUID
+from urllib.parse import urlparse
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,8 +19,8 @@ from typing import Literal
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, create_engine, select
+from pydantic import BaseModel, Field, ValidationError, field_validator
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, create_engine, select, update
 from sqlalchemy.exc import IntegrityError
 from .entra import EntraConfig, configure_entra_routes, session_identity, verify_csrf
 from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
@@ -25,12 +28,34 @@ from .base import Base
 from .events import (FEEDBACK_CREATED, FEEDBACK_STATUS_CHANGED, FeedbackChanged, FeedbackEventPublisher)
 from .reporting import AggregateReportReadModel, ReportProjectionObserver
 from .reconciliation import ReportReconciliationService
+from .local_migrations import upgrade_local_feedback_schema
 from .workflow import (ACTION_REQUIRED, IN_PROGRESS, READY_FOR_REVIEW, CLOSED, INFORMATION,
                        FeedbackStateMachine, TransitionRejected)
 
 WEB = Path(__file__).parent / "web"
 MAX_EVIDENCE_BYTES = 2 * 1024 * 1024
 EVIDENCE_TYPES = {".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".txt": "text/plain"}
+FeedbackJudgement = Literal["requires_improvement", "satisfactory", "good", "very_good", "excellent"]
+JUDGEMENT_LABELS = {
+    "requires_improvement": "Requires improvement",
+    "satisfactory": "Satisfactory",
+    "good": "Good",
+    "very_good": "Very good",
+    "excellent": "Excellent",
+}
+
+def validated_work_url(value: str) -> str:
+    if not value:
+        return ""
+    parsed = urlparse(value)
+    domain = (parsed.hostname or "").lower()
+    domains = ("teams.microsoft.com", "teams.cloud.microsoft", "microsoft365.com")
+    if parsed.scheme != "https" or parsed.username or parsed.password or not (
+        domain in domains or domain.endswith(".sharepoint.com")
+    ):
+        raise ValueError("Use an HTTPS Teams or SharePoint work link.")
+    return value
+
 
 
 def utcnow() -> datetime:
@@ -145,9 +170,33 @@ class Feedback(Base):
     teams_reference: Mapped[str] = mapped_column(String(200))
     feedback_required: Mapped[bool] = mapped_column(Boolean, default=True)
     status: Mapped[str] = mapped_column(String(30), default=ACTION_REQUIRED)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    judgement: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    work_url: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class FeedbackReview(Base):
+    __tablename__ = "mvp_feedback_reviews"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    feedback_id: Mapped[int] = mapped_column(ForeignKey("mvp_feedback.id"))
+    tutor_id: Mapped[str] = mapped_column(ForeignKey("mvp_users.id"))
+    judgement: Mapped[str] = mapped_column(String(30))
+    decision_note: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class FeedbackSubmission(Base):
+    __tablename__ = "mvp_feedback_submissions"
+    __table_args__ = (UniqueConstraint("tutor_id", "client_key", name="uq_mvp_feedback_client_key"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tutor_id: Mapped[str] = mapped_column(ForeignKey("mvp_users.id"))
+    client_key: Mapped[str] = mapped_column(String(36))
+    payload_digest: Mapped[str] = mapped_column(String(64))
+    feedback_id: Mapped[int] = mapped_column(ForeignKey("mvp_feedback.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class Note(Base):
@@ -274,7 +323,22 @@ class NewFeedback(BaseModel):
     teams_assignment_id: str = Field(default="", max_length=100)
     teams_submission_id: str = Field(default="", max_length=100)
     feedback_required: bool = True
+    judgement: FeedbackJudgement | None = None
+    work_url: str = Field(default="", max_length=500)
+    client_key: UUID | None = None
 
+    @field_validator("work_url")
+    @classmethod
+    def check_work_url(cls, value: str) -> str:
+        return validated_work_url(value.strip())
+
+
+class BulkFeedbackItem(NewFeedback):
+    client_key: UUID
+
+
+class BulkFeedbackRequest(BaseModel):
+    items: list[dict] = Field(min_length=1, max_length=60)
 
 
 class NewCriterion(BaseModel):
@@ -301,7 +365,10 @@ class TargetDecision(BaseModel):
 
 class StatusChange(BaseModel):
     status: Literal["ACTION_REQUIRED", "IN_PROGRESS", "READY_FOR_REVIEW", "CLOSED", "INFORMATION"]
+    expected_version: int = Field(ge=1)
     progress_note: str = Field(default="", max_length=2000)
+    judgement: FeedbackJudgement | None = None
+    review_note: str = Field(default="", max_length=2000)
 
 
 class NewComment(BaseModel):
@@ -428,6 +495,8 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
     engine = create_engine(url, connect_args={"check_same_thread": False} if url.startswith("sqlite") else {})
     sessions = sessionmaker(engine, expire_on_commit=False)
     Base.metadata.create_all(engine)
+    if is_demo and engine.dialect.name == "sqlite":
+        upgrade_local_feedback_schema(engine)
     read_model = AggregateReportReadModel()
     with sessions() as db:
         if is_demo and seed:
@@ -501,6 +570,7 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             "cohort_name": db.get(Cohort, thread.cohort_id).name if thread.cohort_id else None,
             "feedback_text": thread.feedback_text,
             "next_step": thread.next_step, "focus_tag": thread.focus_tag,
+            "judgement": thread.judgement, "work_url": thread.work_url, "version": thread.version,
             "teams_reference": thread.teams_reference, "feedback_required": thread.feedback_required,
             "status": thread.status, "updated_at": stamp(thread.updated_at), "closed_at": stamp(thread.closed_at),
         }
@@ -732,8 +802,10 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         thread = accessible(db, person, fid)
         handoff = db.scalar(select(TeamsHandoff).where(TeamsHandoff.feedback_id == fid))
         evidence = db.scalars(select(Evidence).where(Evidence.feedback_id == fid).order_by(Evidence.created_at)).all()
+        reviews = db.scalars(select(FeedbackReview).where(FeedbackReview.feedback_id == fid).order_by(FeedbackReview.id)).all()
         return {
             **summarise(db, thread), "timeline": timeline(db, fid),
+            "reviews": [{"judgement": r.judgement, "note": r.decision_note, "at": stamp(r.created_at)} for r in reviews],
             "teams_handoff": {
                 "confirmed_at": stamp(handoff.confirmed_at),
                 "teams_class_id": handoff.teams_class_id,
@@ -746,14 +818,27 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
                           "sha256": e.digest} for e in evidence],
         }
 
-    @app.post("/api/threads", status_code=201)
-    def new_thread(payload: NewFeedback, person: User = Depends(actor), db: Session = Depends(database)):
-        if person.role != "tutor":
+    def save_feedback_item(db: Session, tutor: User, payload: NewFeedback) -> tuple[Feedback, bool]:
+        if tutor.role != "tutor":
             raise HTTPException(403, "Only tutors can author feedback.")
+        digest = hashlib.sha256(json.dumps(
+            payload.model_dump(mode="json", exclude={"client_key"}), sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        client_key = str(payload.client_key) if payload.client_key else None
+        if client_key:
+            existing = db.scalar(select(FeedbackSubmission).where(
+                FeedbackSubmission.tutor_id == tutor.id, FeedbackSubmission.client_key == client_key,
+            ))
+            if existing:
+                if existing.payload_digest != digest:
+                    raise HTTPException(409, "This submission key belongs to different feedback.")
+                return db.get(Feedback, existing.feedback_id), True
+
         learner = db.get(User, payload.learner_id)
         if learner is None or learner.role != "learner" or db.get(Assignment, payload.assignment_id) is None:
             raise HTTPException(422, "Choose a valid learner and assignment.")
-        permitted = eligible_cohorts(db, payload.assignment_id, person.id, learner.id)
+        permitted = eligible_cohorts(db, payload.assignment_id, tutor.id, learner.id)
         if not permitted:
             raise HTTPException(403, "Tutor and learner must share the assigned cohort.")
         if payload.cohort_id:
@@ -772,14 +857,13 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         target = None
         if payload.target_id is not None:
             target = db.get(ImprovementTarget, payload.target_id)
-            if not target or target.status != "OPEN" or target.cohort_id != selected_cohort or target.learner_id != learner.id or target.tutor_id != person.id:
+            if not target or target.status != "OPEN" or target.cohort_id != selected_cohort or target.learner_id != learner.id or target.tutor_id != tutor.id:
                 raise HTTPException(403, "Target is not accessible for this learner and cohort.")
         if not payload.feedback_text.strip() or (payload.feedback_required and not payload.next_step.strip()):
             raise HTTPException(422, "Feedback text and, when required, an actionable next step are needed.")
         if not payload.teams_recorded_confirmed:
             raise HTTPException(422, "Confirm that initial feedback was recorded in Teams.")
-        teams_ids = (payload.teams_class_id.strip(), payload.teams_assignment_id.strip(),
-                     payload.teams_submission_id.strip())
+        teams_ids = (payload.teams_class_id.strip(), payload.teams_assignment_id.strip(), payload.teams_submission_id.strip())
         if any(teams_ids) and not all(teams_ids):
             raise HTTPException(422, "Provide all three Teams identifiers or none.")
         if all(teams_ids):
@@ -793,12 +877,13 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         thread = Feedback(
             assignment_id=payload.assignment_id, cohort_id=selected_cohort,
             criterion_id=criterion.id if criterion else None,
-            learner_id=learner.id, tutor_id=person.id,
+            learner_id=learner.id, tutor_id=tutor.id,
             criterion=f"{criterion.code} · {criterion.description}" if criterion else payload.criterion.strip(),
             feedback_text=payload.feedback_text.strip(),
             next_step=payload.next_step.strip(), focus_tag=payload.focus_tag.strip(),
             teams_reference=payload.teams_reference.strip(), feedback_required=payload.feedback_required,
             status=ACTION_REQUIRED if payload.feedback_required else INFORMATION,
+            judgement=payload.judgement, work_url=payload.work_url,
         )
         db.add(thread)
         db.flush()
@@ -808,25 +893,84 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             teams_class_id=teams_ids[0] or None,
             teams_assignment_id=teams_ids[1] or None,
             teams_submission_id=teams_ids[2] or None,
-            confirmed_by=person.id,
+            confirmed_by=tutor.id,
         ))
         if target is not None:
             db.add(TargetLink(target_id=target.id, feedback_id=thread.id))
+        if client_key:
+            db.add(FeedbackSubmission(
+                tutor_id=tutor.id, client_key=client_key,
+                payload_digest=digest, feedback_id=thread.id,
+            ))
         publisher.publish(db, FeedbackChanged(
-            event_type=FEEDBACK_CREATED, feedback_id=thread.id, actor_id=person.id,
+            event_type=FEEDBACK_CREATED, feedback_id=thread.id, actor_id=tutor.id,
             previous_status=None, status=thread.status, feedback_required=thread.feedback_required,
             focus_tag=thread.focus_tag,
         ))
+        return thread, False
+
+    @app.post("/api/threads", status_code=201)
+    def new_thread(payload: NewFeedback, person: User = Depends(actor), db: Session = Depends(database)):
         try:
+            thread, _ = save_feedback_item(db, person, payload)
             db.commit()
         except IntegrityError as exc:
             db.rollback()
-            raise HTTPException(409, "Feedback has already been linked to this Teams submission.") from exc
+            raise HTTPException(409, "Feedback submission was already saved or the Teams reference is in use.") from exc
         return summarise(db, thread)
+
+    @app.post("/api/threads/bulk")
+    def submit_bulk(payload: BulkFeedbackRequest, person: User = Depends(actor)):
+        if person.role != "tutor":
+            raise HTTPException(403, "Only tutors can author feedback.")
+        results = []
+        for raw in payload.items:
+            try:
+                item = BulkFeedbackItem.model_validate(raw)
+            except ValidationError:
+                results.append({
+                    "client_key": str(raw.get("client_key", ""))[:36], "ok": False,
+                    "code": 422, "error": "Feedback row has invalid or missing fields.",
+                })
+                continue
+            with sessions() as row_db:
+                try:
+                    current_tutor = row_db.get(User, person.id)
+                    thread, replayed = save_feedback_item(row_db, current_tutor, item)
+                    row_db.commit()
+                    results.append({
+                        "client_key": str(item.client_key), "ok": True,
+                        "replayed": replayed, "feedback_id": thread.id,
+                    })
+                except HTTPException as exc:
+                    row_db.rollback()
+                    results.append({
+                        "client_key": str(item.client_key), "ok": False,
+                        "code": exc.status_code, "error": str(exc.detail),
+                    })
+                except IntegrityError:
+                    row_db.rollback()
+                    results.append({
+                        "client_key": str(item.client_key), "ok": False,
+                        "code": 409, "error": "Duplicate feedback or submission reference; check before retrying.",
+                    })
+                except Exception:
+                    row_db.rollback()
+                    results.append({
+                        "client_key": str(item.client_key), "ok": False,
+                        "code": 500, "error": "Unable to save this row. It has been retained for retry.",
+                    })
+        return {
+            "saved": sum(row["ok"] for row in results),
+            "failed": sum(not row["ok"] for row in results),
+            "results": results,
+        }
 
     @app.post("/api/threads/{fid}/status")
     def change_status(fid: int, payload: StatusChange, person: User = Depends(actor), db: Session = Depends(database)):
         thread = accessible(db, person, fid)
+        if thread.version != payload.expected_version:
+            raise HTTPException(409, "Feedback has changed. Refresh the record before submitting again.")
         try:
             decision = machine.decide(
                 current=thread.status, target=payload.status, actor_role=person.role,
@@ -834,15 +978,34 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             )
         except TransitionRejected as exc:
             raise HTTPException(exc.code, str(exc)) from exc
+        if decision.tutor_approved and thread.feedback_required:
+            if payload.judgement is None or len(payload.review_note.strip()) < 5:
+                raise HTTPException(422, "Choose a judgement and write a short tutor review before closing.")
+        elif payload.judgement is not None or payload.review_note.strip():
+            raise HTTPException(422, "Review details are only accepted when closing actionable feedback.")
 
-        # Apply the approved transition and publish both audit and report
-        # observations inside the same transaction; any failure rolls back all.
-        thread.status = decision.target
-        thread.updated_at = utcnow()
-        thread.closed_at = utcnow() if decision.tutor_approved else None
+        changed_at = utcnow()
+        affected = db.execute(update(Feedback).where(
+            Feedback.id == fid, Feedback.version == payload.expected_version,
+        ).values(
+            status=decision.target, version=Feedback.version + 1, updated_at=changed_at,
+            closed_at=changed_at if decision.tutor_approved else None,
+        ).execution_options(synchronize_session=False)).rowcount
+        if affected != 1:
+            db.rollback()
+            raise HTTPException(409, "Feedback has changed. Refresh the record before submitting again.")
         if decision.progress_note:
             db.add(Note(feedback_id=fid, author_id=person.id,
                         body="Work submitted for review: " + decision.progress_note))
+        if decision.tutor_approved and thread.feedback_required:
+            db.add(FeedbackReview(
+                feedback_id=fid, tutor_id=person.id,
+                judgement=payload.judgement, decision_note=payload.review_note.strip(),
+            ))
+            db.add(Note(
+                feedback_id=fid, author_id=person.id,
+                body=f"Review — {JUDGEMENT_LABELS[payload.judgement]}: {payload.review_note.strip()}",
+            ))
         publisher.publish(db, FeedbackChanged(
             event_type=FEEDBACK_STATUS_CHANGED, feedback_id=fid, actor_id=person.id,
             previous_status=decision.previous, status=decision.target,
@@ -850,6 +1013,7 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             tutor_approved=decision.tutor_approved,
         ))
         db.commit()
+        db.refresh(thread)
         return summarise(db, thread)
 
     @app.post("/api/threads/{fid}/comments", status_code=201)

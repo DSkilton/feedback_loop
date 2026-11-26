@@ -4,6 +4,7 @@ from dataclasses import replace
 import pytest
 from fastapi.testclient import TestClient
 
+from mvp.tests.helpers import versioned_status_post
 from mvp.api import create_app
 from mvp.entra import EntraConfig, approved_identity
 
@@ -59,5 +60,5 @@ def test_non_demo_mode_rejects_spoofed_demo_header(tmp_path):
     client = TestClient(app)
     assert client.get("/api/auth-mode").json()["mode"] == "disabled"
     assert client.get("/api/threads", headers={"X-Demo-User": "tutor-1"}).status_code == 403
-    assert client.post("/api/threads/1/status", headers={"X-Demo-User": "tutor-1"},
+    assert versioned_status_post(client, "/api/threads/1/status", headers={"X-Demo-User": "tutor-1"},
                        json={"status": "CLOSED"}).status_code == 403

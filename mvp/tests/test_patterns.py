@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 
+from mvp.tests.helpers import versioned_status_post
 from mvp.api import create_app
 from mvp.reporting import AggregateReportReadModel, ReportCounter
 from mvp.workflow import FeedbackStateMachine, TransitionRejected
@@ -76,13 +77,13 @@ def test_observer_audit_and_report_counters_share_one_commit(system):
     client, path, _ = system
     before = query(path, "select count(*) from mvp_domain_events")[0][0]
     caller(client, "learner-1")
-    assert client.post("/api/threads/1/status", json={"status": "IN_PROGRESS"}).status_code == 200
-    assert client.post("/api/threads/1/status", json={
+    assert versioned_status_post(client, "/api/threads/1/status", json={"status": "IN_PROGRESS"}).status_code == 200
+    assert versioned_status_post(client, "/api/threads/1/status", json={
         "status": "READY_FOR_REVIEW", "progress_note": "Tests now include invalid inputs."
     }).status_code == 200
 
     caller(client, "tutor-1")
-    assert client.post("/api/threads/1/status", json={"status": "CLOSED"}).status_code == 200
+    assert versioned_status_post(client, "/api/threads/1/status", json={"status": "CLOSED"}).status_code == 200
     history = client.get("/api/threads/1").json()["timeline"]
     assert any("Tutor approved and CLOSED" in item["text"] for item in history)
 
@@ -137,8 +138,8 @@ def test_creation_observer_updates_focus_and_actions(system):
 def test_refused_transition_has_no_event_or_projection_effect(system):
     client, path, _ = system
     caller(client, "learner-1")
-    assert client.post("/api/threads/1/status", json={"status": "CLOSED"}).status_code == 403
-    assert client.post("/api/threads/1/status", json={"status": "READY_FOR_REVIEW"}).status_code == 403
+    assert versioned_status_post(client, "/api/threads/1/status", json={"status": "CLOSED"}).status_code == 403
+    assert versioned_status_post(client, "/api/threads/1/status", json={"status": "READY_FOR_REVIEW"}).status_code == 403
     assert query(path, "select count(*) from mvp_domain_events")[0][0] == 0
     assert query(path, "select status from mvp_feedback where id=1") == [("ACTION_REQUIRED",)]
     assert query(path, "select value from mvp_report_counters where key='status:ACTION_REQUIRED'") == [(2,)]
@@ -152,7 +153,7 @@ def test_observer_projection_failure_rolls_back_workflow_and_audit(system):
         db.execute("update mvp_report_counters set value=0 where key='status:ACTION_REQUIRED'")
     caller(client, "learner-1")
     with pytest.raises(RuntimeError, match="projection out of sync"):
-        client.post("/api/threads/1/status", json={"status": "IN_PROGRESS"})
+        versioned_status_post(client, "/api/threads/1/status", json={"status": "IN_PROGRESS"})
     assert query(path, "select status from mvp_feedback where id=1") == [("ACTION_REQUIRED",)]
     assert query(path, "select count(*) from mvp_domain_events")[0][0] == 0
     assert query(path, "select count(*) from mvp_events")[0][0] == 0

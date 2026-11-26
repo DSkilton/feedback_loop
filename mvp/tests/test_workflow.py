@@ -1,6 +1,7 @@
 """Core role/transition tests with synthetic data in isolated SQLite databases."""
 import pytest
 from fastapi.testclient import TestClient
+from mvp.tests.helpers import versioned_status_post
 from mvp.api import create_app
 
 
@@ -30,27 +31,27 @@ def test_student_can_progress_own_work_but_cannot_close(client):
     assert client.get("/api/threads/4").status_code == 404
     thread = next(t for t in own if t["status"] == "ACTION_REQUIRED")
     fid = thread["id"]
-    assert client.post(f"/api/threads/{fid}/status", json={"status": "CLOSED"}).status_code == 403
-    assert client.post(f"/api/threads/{fid}/status", json={"status": "IN_PROGRESS"}).status_code == 200
-    assert client.post(f"/api/threads/{fid}/status", json={"status": "READY_FOR_REVIEW"}).status_code == 422
-    assert client.post(f"/api/threads/{fid}/status", json={"status": "READY_FOR_REVIEW", "progress_note": "Added validation and tests."}).status_code == 200
+    assert versioned_status_post(client, f"/api/threads/{fid}/status", json={"status": "CLOSED"}).status_code == 403
+    assert versioned_status_post(client, f"/api/threads/{fid}/status", json={"status": "IN_PROGRESS"}).status_code == 200
+    assert versioned_status_post(client, f"/api/threads/{fid}/status", json={"status": "READY_FOR_REVIEW"}).status_code == 422
+    assert versioned_status_post(client, f"/api/threads/{fid}/status", json={"status": "READY_FOR_REVIEW", "progress_note": "Added validation and tests."}).status_code == 200
     history = client.get(f"/api/threads/{fid}").json()["timeline"]
     assert any("Added validation and tests." in e["text"] for e in history)
-    assert client.post(f"/api/threads/{fid}/status", json={"status": "CLOSED"}).status_code == 403
+    assert versioned_status_post(client, f"/api/threads/{fid}/status", json={"status": "CLOSED"}).status_code == 403
     assert client.post("/api/threads", json={}).status_code == 422  # invalid payload cannot be written
     assert client.get("/api/reports").status_code == 403
 
 
 def test_teacher_reviews_closes_and_reopens(client):
     as_user(client, "tutor-1")
-    assert client.post("/api/threads/1/status", json={"status": "CLOSED"}).status_code == 409
+    assert versioned_status_post(client, "/api/threads/1/status", json={"status": "CLOSED"}).status_code == 409
     # Synthetic seeded record 3 is ready for a tutor decision.
-    result = client.post("/api/threads/3/status", json={"status": "CLOSED"})
+    result = versioned_status_post(client, "/api/threads/3/status", json={"status": "CLOSED"})
     assert result.status_code == 200
     assert result.json()["closed_at"] is not None
     details = client.get("/api/threads/3").json()
     assert any("CLOSED" in event["text"] for event in details["timeline"])
-    reopened = client.post("/api/threads/3/status", json={"status": "ACTION_REQUIRED"})
+    reopened = versioned_status_post(client, "/api/threads/3/status", json={"status": "ACTION_REQUIRED"})
     assert reopened.status_code == 200
     assert reopened.json()["closed_at"] is None
 
@@ -58,7 +59,7 @@ def test_teacher_reviews_closes_and_reopens(client):
 def test_student_cannot_edit_tutor_feedback_or_other_students_comments(client):
     as_user(client, "learner-1")
     assert client.post("/api/threads/4/comments", json={"body": "Hello"}).status_code == 404
-    assert client.post("/api/threads/4/status", json={"status": "IN_PROGRESS"}).status_code == 404
+    assert versioned_status_post(client, "/api/threads/4/status", json={"status": "IN_PROGRESS"}).status_code == 404
     assert client.post("/api/threads/1/comments", json={"body": "I've started the work."}).status_code == 201
     details = client.get("/api/threads/1").json()
     assert any(e["text"] == "I've started the work." for e in details["timeline"])
@@ -80,9 +81,9 @@ def test_teacher_controls_feedback_required_checkbox(client):
     assert created.json()["feedback_required"] is False
     fid = created.json()["id"]
     as_user(client, "learner-1")
-    assert client.post(f"/api/threads/{fid}/status", json={"status": "CLOSED"}).status_code == 403
+    assert versioned_status_post(client, f"/api/threads/{fid}/status", json={"status": "CLOSED"}).status_code == 403
     as_user(client, "tutor-1")
-    assert client.post(f"/api/threads/{fid}/status", json={"status": "CLOSED"}).status_code == 200
+    assert versioned_status_post(client, f"/api/threads/{fid}/status", json={"status": "CLOSED"}).status_code == 200
 
 
 def test_feedback_required_must_include_action_and_teams_reference(client):
@@ -147,7 +148,7 @@ def test_evidence_upload_download_is_private_and_validated(client):
     as_user(client, "learner-1")
     pdf = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF"
     assert client.post("/api/threads/1/evidence", files={"file": ("work.pdf", pdf, "application/pdf")}).status_code == 403
-    assert client.post("/api/threads/1/status", json={"status": "IN_PROGRESS"}).status_code == 200
+    assert versioned_status_post(client, "/api/threads/1/status", json={"status": "IN_PROGRESS"}).status_code == 200
     wrong = client.post("/api/threads/1/evidence", files={"file": ("bad.png", pdf, "image/png")})
     assert wrong.status_code == 422
     large = client.post("/api/threads/1/evidence", files={"file": ("big.pdf", b"%PDF-" + b"a" * (2 * 1024 * 1024), "application/pdf")})

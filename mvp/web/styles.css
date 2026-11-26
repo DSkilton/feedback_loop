@@ -303,3 +303,33 @@ dialog::backdrop { background: #1627448c; backdrop-filter: blur(3px); }
 .report-integrity button:disabled { opacity: .55; cursor: wait; }
 .report-integrity .quiet { margin: 8px 0 0; line-height: 1.6; }
 .report-differences { margin: 12px 0 0; padding-left: 20px; color: #536783; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.bulk-form { display: flex; flex-direction: column; gap: 16px; }
+.bulk-settings { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; padding: 22px; background: #fff; border: 1px solid var(--border); border-radius: 12px; }
+.bulk-settings label:not(.tick-row) { display: flex; flex-direction: column; gap: 7px; font-size: 12px; font-weight: 700; color: #405977; }
+.bulk-settings input:not([type="checkbox"]), .bulk-settings select, .bulk-table input, .bulk-table select, .bulk-table textarea, .teacher-review select, .teacher-review textarea { width: 100%; border: 1px solid #c8d5e4; background: #fff; border-radius: 7px; padding: 10px; font: inherit; font-size: 13px; color: #33465b; }
+.bulk-settings .bulk-reference { grid-column: 1/-1; }
+.bulk-settings .bulk-confirm { grid-column: 1/-1; font-size: 13px; }
+.bulk-save-status { font-size: 12px; color: #526985; margin: 0; }
+.bulk-table-wrap { background: #fff; border: 1px solid var(--border); border-radius: 12px; overflow-x: auto; }
+.bulk-table { width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 820px; }
+.bulk-table th, .bulk-table td { padding: 14px; text-align: left; border-bottom: 1px solid #e3eaf3; vertical-align: top; }
+.bulk-table thead th { background: #f4f7fb; font-size: 12px; color: #4c6180; }
+.bulk-table thead th:first-child { width: 17%; }
+.bulk-table thead th:nth-child(2) { width: 38%; }
+.bulk-table thead th:nth-child(3) { width: 18%; }
+.bulk-table tbody th { font-weight: 700; font-size: 13px; color: #334965; }
+.bulk-table textarea { resize: vertical; min-height: 80px; }
+.bulk-table td:last-child textarea { margin-top: 10px; min-height: 68px; }
+.bulk-table input:disabled, .bulk-table textarea:disabled, .bulk-table select:disabled { background: #edf1f5; cursor: not-allowed; }
+.bulk-row-state { display: block; margin-top: 8px; font-size: 11px; font-weight: 500; color: #85633d; }
+.bulk-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 2px; }
+.bulk-footer p { margin: 0; font-size: 12px; color: #526985; flex: 1; }
+.teacher-review { display: grid; gap: 12px; padding: 18px; margin: 16px 0; background: #f2f7fc; border: 1px solid #d5e2ef; border-radius: 10px; }
+.teacher-review h3 { margin: 0; }
+.teacher-review label { display: grid; gap: 6px; color: #405977; font-size: 12px; font-weight: 700; }
+.detail-judgement { font-weight: 650; text-transform: capitalize; }
+#detailConflict { margin: 10px 0; color: #a04928; font-size: 12px; font-weight: 700; }
+.bulk-settings :is(input, select):focus-visible, .bulk-table :is(input,textarea,select):focus-visible, .teacher-review :is(select,textarea):focus-visible { outline: 3px solid #2879bf; outline-offset: 2px; }
+@media (max-width: 780px) { .bulk-settings { grid-template-columns: 1fr; padding: 16px; } }

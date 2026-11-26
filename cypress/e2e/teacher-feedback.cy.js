@@ -34,6 +34,11 @@ describe("Teacher feedback journeys", () => {
       .type("This row must remain recoverable after a failed network request.");
     cy.get("#bulkSubmit").click();
     cy.wait("@lost");
+    cy.get("#bulkResult").invoke("text").then((value) => cy.task("diagnostic", "immediate result: " + value));
+    cy.window().then((win) => cy.task("diagnostic", "state: " + win.bulkFeedback.resultMessage + "; submitting=" + win.bulkFeedback.submitting));
+    cy.wait(1000);
+    cy.get("#bulkResult").invoke("text").then((value) => cy.task("diagnostic", "one second later: " + value));
+    cy.window().then((win) => cy.task("diagnostic", "state after one second: " + win.bulkFeedback.resultMessage + "; submitting=" + win.bulkFeedback.submitting));
     cy.get("#bulkResult").should("contain", "Connection uncertain");
     cy.reload();
     cy.get("#bulkNav").click();

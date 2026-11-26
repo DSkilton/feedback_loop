@@ -28,6 +28,7 @@ from .base import Base
 from .events import (FEEDBACK_CREATED, FEEDBACK_STATUS_CHANGED, FeedbackChanged, FeedbackEventPublisher)
 from .reporting import AggregateReportReadModel, ReportProjectionObserver
 from .reconciliation import ReportReconciliationService
+from .local_migrations import upgrade_local_feedback_schema
 from .workflow import (ACTION_REQUIRED, IN_PROGRESS, READY_FOR_REVIEW, CLOSED, INFORMATION,
                        FeedbackStateMachine, TransitionRejected)
 
@@ -494,6 +495,8 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
     engine = create_engine(url, connect_args={"check_same_thread": False} if url.startswith("sqlite") else {})
     sessions = sessionmaker(engine, expire_on_commit=False)
     Base.metadata.create_all(engine)
+    if is_demo and engine.dialect.name == "sqlite":
+        upgrade_local_feedback_schema(engine)
     read_model = AggregateReportReadModel()
     with sessions() as db:
         if is_demo and seed:

@@ -815,14 +815,27 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
                           "sha256": e.digest} for e in evidence],
         }
 
-    @app.post("/api/threads", status_code=201)
-    def new_thread(payload: NewFeedback, person: User = Depends(actor), db: Session = Depends(database)):
-        if person.role != "tutor":
+    def save_feedback_item(db: Session, tutor: User, payload: NewFeedback) -> tuple[Feedback, bool]:
+        if tutor.role != "tutor":
             raise HTTPException(403, "Only tutors can author feedback.")
+        digest = hashlib.sha256(json.dumps(
+            payload.model_dump(mode="json", exclude={"client_key"}), sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        client_key = str(payload.client_key) if payload.client_key else None
+        if client_key:
+            existing = db.scalar(select(FeedbackSubmission).where(
+                FeedbackSubmission.tutor_id == tutor.id, FeedbackSubmission.client_key == client_key,
+            ))
+            if existing:
+                if existing.payload_digest != digest:
+                    raise HTTPException(409, "This submission key belongs to different feedback.")
+                return db.get(Feedback, existing.feedback_id), True
+
         learner = db.get(User, payload.learner_id)
         if learner is None or learner.role != "learner" or db.get(Assignment, payload.assignment_id) is None:
             raise HTTPException(422, "Choose a valid learner and assignment.")
-        permitted = eligible_cohorts(db, payload.assignment_id, person.id, learner.id)
+        permitted = eligible_cohorts(db, payload.assignment_id, tutor.id, learner.id)
         if not permitted:
             raise HTTPException(403, "Tutor and learner must share the assigned cohort.")
         if payload.cohort_id:
@@ -841,14 +854,13 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         target = None
         if payload.target_id is not None:
             target = db.get(ImprovementTarget, payload.target_id)
-            if not target or target.status != "OPEN" or target.cohort_id != selected_cohort or target.learner_id != learner.id or target.tutor_id != person.id:
+            if not target or target.status != "OPEN" or target.cohort_id != selected_cohort or target.learner_id != learner.id or target.tutor_id != tutor.id:
                 raise HTTPException(403, "Target is not accessible for this learner and cohort.")
         if not payload.feedback_text.strip() or (payload.feedback_required and not payload.next_step.strip()):
             raise HTTPException(422, "Feedback text and, when required, an actionable next step are needed.")
         if not payload.teams_recorded_confirmed:
             raise HTTPException(422, "Confirm that initial feedback was recorded in Teams.")
-        teams_ids = (payload.teams_class_id.strip(), payload.teams_assignment_id.strip(),
-                     payload.teams_submission_id.strip())
+        teams_ids = (payload.teams_class_id.strip(), payload.teams_assignment_id.strip(), payload.teams_submission_id.strip())
         if any(teams_ids) and not all(teams_ids):
             raise HTTPException(422, "Provide all three Teams identifiers or none.")
         if all(teams_ids):
@@ -862,12 +874,13 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         thread = Feedback(
             assignment_id=payload.assignment_id, cohort_id=selected_cohort,
             criterion_id=criterion.id if criterion else None,
-            learner_id=learner.id, tutor_id=person.id,
+            learner_id=learner.id, tutor_id=tutor.id,
             criterion=f"{criterion.code} · {criterion.description}" if criterion else payload.criterion.strip(),
             feedback_text=payload.feedback_text.strip(),
             next_step=payload.next_step.strip(), focus_tag=payload.focus_tag.strip(),
             teams_reference=payload.teams_reference.strip(), feedback_required=payload.feedback_required,
             status=ACTION_REQUIRED if payload.feedback_required else INFORMATION,
+            judgement=payload.judgement, work_url=payload.work_url,
         )
         db.add(thread)
         db.flush()
@@ -877,21 +890,70 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             teams_class_id=teams_ids[0] or None,
             teams_assignment_id=teams_ids[1] or None,
             teams_submission_id=teams_ids[2] or None,
-            confirmed_by=person.id,
+            confirmed_by=tutor.id,
         ))
         if target is not None:
             db.add(TargetLink(target_id=target.id, feedback_id=thread.id))
+        if client_key:
+            db.add(FeedbackSubmission(
+                tutor_id=tutor.id, client_key=client_key,
+                payload_digest=digest, feedback_id=thread.id,
+            ))
         publisher.publish(db, FeedbackChanged(
-            event_type=FEEDBACK_CREATED, feedback_id=thread.id, actor_id=person.id,
+            event_type=FEEDBACK_CREATED, feedback_id=thread.id, actor_id=tutor.id,
             previous_status=None, status=thread.status, feedback_required=thread.feedback_required,
             focus_tag=thread.focus_tag,
         ))
+        return thread, False
+
+    @app.post("/api/threads", status_code=201)
+    def new_thread(payload: NewFeedback, person: User = Depends(actor), db: Session = Depends(database)):
         try:
+            thread, _ = save_feedback_item(db, person, payload)
             db.commit()
         except IntegrityError as exc:
             db.rollback()
-            raise HTTPException(409, "Feedback has already been linked to this Teams submission.") from exc
+            raise HTTPException(409, "Feedback submission was already saved or the Teams reference is in use.") from exc
         return summarise(db, thread)
+
+    @app.post("/api/threads/bulk")
+    def submit_bulk(payload: BulkFeedbackRequest, person: User = Depends(actor)):
+        if person.role != "tutor":
+            raise HTTPException(403, "Only tutors can author feedback.")
+        results = []
+        for item in payload.items:
+            with sessions() as row_db:
+                try:
+                    current_tutor = row_db.get(User, person.id)
+                    thread, replayed = save_feedback_item(row_db, current_tutor, item)
+                    row_db.commit()
+                    results.append({
+                        "client_key": str(item.client_key), "ok": True,
+                        "replayed": replayed, "feedback_id": thread.id,
+                    })
+                except HTTPException as exc:
+                    row_db.rollback()
+                    results.append({
+                        "client_key": str(item.client_key), "ok": False,
+                        "code": exc.status_code, "error": str(exc.detail),
+                    })
+                except IntegrityError:
+                    row_db.rollback()
+                    results.append({
+                        "client_key": str(item.client_key), "ok": False,
+                        "code": 409, "error": "Duplicate feedback or submission reference; check before retrying.",
+                    })
+                except Exception:
+                    row_db.rollback()
+                    results.append({
+                        "client_key": str(item.client_key), "ok": False,
+                        "code": 500, "error": "Unable to save this row. It has been retained for retry.",
+                    })
+        return {
+            "saved": sum(row["ok"] for row in results),
+            "failed": sum(not row["ok"] for row in results),
+            "results": results,
+        }
 
     @app.post("/api/threads/{fid}/status")
     def change_status(fid: int, payload: StatusChange, person: User = Depends(actor), db: Session = Depends(database)):

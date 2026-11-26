@@ -5,6 +5,7 @@ describe("Organisation configuration and read-only oversight", () => {
     cy.get("#organisationNav").should("be.visible").click();
     cy.get("#orgYear").clear().type("2026/27");
     cy.get("#orgYearLoad").click();
+    cy.get("#orgYearLoad").should("not.be.disabled");
     cy.get('[data-catalogue="faculties"] input[name="id"]').type("digital");
     cy.get('[data-catalogue="faculties"] input[name="title"]').type("Digital");
     cy.get('[data-catalogue="faculties"] button').click();
@@ -13,14 +14,14 @@ describe("Organisation configuration and read-only oversight", () => {
     cy.get('[data-catalogue="departments"] input[name="title"]').type("Computing");
     cy.get('[data-catalogue="departments"] select').select("digital");
     cy.get('[data-catalogue="departments"] button').click();
-    cy.get("#orgCourse").select("computing");
+    cy.get("#orgCourse").should("not.be.disabled").select("computing");
     cy.get('#courseDepartmentForm input[value="computing"]').should("exist").check();
     cy.get("#courseDepartmentForm button").click();
-    cy.get("#orgStaff").select("tutor-2");
+    cy.get("#orgStaff").should("not.be.disabled").select("tutor-2");
     cy.get('#staffAllocationForm input[name="programme_lead_department_ids"][value="computing"]').check();
     cy.get('#staffAllocationForm input[name="iv_course_ids"][value="computing"]').check();
     cy.get("#staffAllocationForm button").click();
-    cy.get("#orgStaff").select("tutor-2");
+    cy.get("#orgStaff").should("not.be.disabled").select("tutor-2");
     cy.get('#staffAllocationForm input[name="programme_lead_department_ids"][value="computing"]').should("be.checked");
     cy.get('#staffAllocationForm input[name="iv_course_ids"][value="computing"]').should("be.checked");
     cy.get("#identitySelect").select("tutor-2");

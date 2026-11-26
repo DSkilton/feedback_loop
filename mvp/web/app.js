@@ -71,6 +71,8 @@ async function refresh() {
 function updateNavigation() {
   const admin = state.bootstrap?.user.role === "admin";
   $("reportsNav").hidden = !admin;
+  $("oversightNav").hidden = !state.bootstrap?.can_view_oversight;
+  $("organisationNav").hidden = !state.bootstrap?.can_manage_organisation;
   $("boardNav").hidden = admin;
   $("bulkNav").hidden = admin || state.bootstrap?.user.role !== "tutor";
   document.querySelectorAll("[data-page]").forEach((button) => button.classList.toggle("active", button.dataset.page === state.page));
@@ -292,6 +294,8 @@ async function renderTutorFocus() {
 async function render() {
   if (state.page === "reports") await renderReports();
   else if (state.page === "bulk") await window.bulkFeedback.render();
+  else if (state.page === "oversight") await window.organisation.renderOversight();
+  else if (state.page === "organisation") await window.organisation.renderConfiguration();
   else {
     renderBoard();
     if (state.bootstrap.user.role === "tutor") await renderTutorFocus();

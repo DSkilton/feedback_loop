@@ -25,6 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from .entra import EntraConfig, configure_entra_routes, session_identity, verify_csrf
 from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
 from .base import Base
+from .organisation import OversightScope, can_manage_organisation, register_organisation_routes
 from .events import (FEEDBACK_CREATED, FEEDBACK_STATUS_CHANGED, FeedbackChanged, FeedbackEventPublisher)
 from .reporting import AggregateReportReadModel, ReportProjectionObserver
 from .reconciliation import ReportReconciliationService
@@ -543,6 +544,9 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             return person
         raise HTTPException(403, "Authentication is disabled until College configuration is approved.")
 
+    oversight_scope = OversightScope()
+    register_organisation_routes(app, database, actor, User, Course, is_demo)
+
     def accessible(db: Session, person: User, feedback_id: int) -> Feedback:
         thread = db.get(Feedback, feedback_id)
         if thread is None:
@@ -597,6 +601,8 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         return {
             "auth_mode": mode, "csrf_token": request.session.get("csrf") if entra_config else None,
             "user": {"id": person.id, "name": person.name, "role": person.role},
+            "can_view_oversight": oversight_scope.enabled(db, person),
+            "can_manage_organisation": can_manage_organisation(person, is_demo),
             "cohorts": [
                 {"id": c.id, "name": c.name, "academic_year": c.academic_year,
                  "course": db.get(Course, c.course_id).title}
@@ -785,6 +791,40 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
         db.commit()
         return target_payload(db, target)
 
+    @app.get("/api/oversight")
+    def oversight(person: User = Depends(actor), db: Session = Depends(database)):
+        if not oversight_scope.enabled(db, person):
+            raise HTTPException(403, "Oversight is not allocated to this account.")
+        ids = oversight_scope.cohort_ids(db, person, Cohort)
+        cohorts = db.scalars(select(Cohort).where(Cohort.id.in_(ids)).order_by(Cohort.name)).all()
+        threads = db.scalars(select(Feedback).where(Feedback.cohort_id.in_(ids))
+                             .order_by(Feedback.updated_at.desc())).all()
+        memberships = db.scalars(select(Enrollment).where(
+            Enrollment.cohort_id.in_(ids), Enrollment.member_role == "learner")).all()
+        return {
+            "cohorts": [{"id": c.id, "name": c.name, "course": db.get(Course, c.course_id).title,
+                         "academic_year": c.academic_year} for c in cohorts],
+            "learners": [{"id": e.user_id, "cohort_id": e.cohort_id, "name": db.get(User, e.user_id).name}
+                         for e in memberships],
+            "feedback": [{**summarise(db, t), "tutor": db.get(User, t.tutor_id).name} for t in threads],
+        }
+
+    @app.get("/api/oversight/feedback/{fid}")
+    def oversight_detail(fid: int, person: User = Depends(actor), db: Session = Depends(database)):
+        if not oversight_scope.enabled(db, person):
+            raise HTTPException(403, "Oversight is not allocated to this account.")
+        thread = db.get(Feedback, fid)
+        if not thread or thread.cohort_id not in oversight_scope.cohort_ids(db, person, Cohort):
+            raise HTTPException(404, "Feedback not found.")
+        reviews = db.scalars(select(FeedbackReview).where(FeedbackReview.feedback_id == fid)
+                             .order_by(FeedbackReview.id)).all()
+        return {
+            **summarise(db, thread), "tutor": db.get(User, thread.tutor_id).name,
+            "timeline": timeline(db, fid),
+            "reviews": [{"judgement": r.judgement, "note": r.decision_note, "at": stamp(r.created_at)} for r in reviews],
+            "read_only": True,
+        }
+
     @app.get("/api/threads")
     def list_threads(person: User = Depends(actor), db: Session = Depends(database)):
         if person.role == "admin":
@@ -833,7 +873,10 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             if existing:
                 if existing.payload_digest != digest:
                     raise HTTPException(409, "This submission key belongs to different feedback.")
-                return db.get(Feedback, existing.feedback_id), True
+                previous = db.get(Feedback, existing.feedback_id)
+                if previous is None or previous.cohort_id not in cohort_ids(db, tutor):
+                    raise HTTPException(403, "Feedback is no longer in an assigned teaching cohort.")
+                return previous, True
 
         learner = db.get(User, payload.learner_id)
         if learner is None or learner.role != "learner" or db.get(Assignment, payload.assignment_id) is None:

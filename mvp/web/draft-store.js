@@ -12,6 +12,9 @@ class FeedbackDraftStore {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error || new Error("Cannot access local draft storage."));
         request.onblocked = () => reject(new Error("Close other Feedback Loop tabs before updating draft storage."));
+      }).catch((error) => {
+        this.connection = null;
+        throw error;
       });
     }
     return this.connection;

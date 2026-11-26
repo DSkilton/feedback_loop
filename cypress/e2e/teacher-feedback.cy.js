@@ -26,26 +26,37 @@ describe("Teacher feedback journeys", () => {
     cy.get('[data-learner="learner-2"] .bulk-row-state').should("contain", "Published");
   });
 
-  it("keeps the exact attempted payload when the network response is lost", () => {
-    cy.intercept({ method: "POST", url: "/api/threads/bulk", times: 1 }, { forceNetworkError: true }).as("lost");
+  it("retries a committed submission when its acknowledgement was lost", () => {
     cy.get('[data-global="teams_reference"]').type("Teams resilience assignment");
     cy.get('[data-global="teams_recorded_confirmed"]').check();
     cy.get('[data-learner="learner-1"] [data-field="feedback_text"]')
-      .type("This row must remain recoverable after a failed network request.");
+      .type("This row must remain recoverable when its server acknowledgement is lost.");
+    cy.window().then((win) => {
+      const realFetch = win.fetch.bind(win);
+      let discard = true;
+      cy.stub(win, "fetch").callsFake(async (url, options) => {
+        const response = await realFetch(url, options);
+        if (discard && url === "/api/threads/bulk") {
+          discard = false;
+          throw new TypeError("Simulated lost acknowledgement after server commit");
+        }
+        return response;
+      });
+    });
     cy.get("#bulkSubmit").click();
-    cy.wait("@lost");
-    cy.get("#bulkResult").invoke("text").then((value) => cy.task("diagnostic", "immediate result: " + value));
-    cy.window().then((win) => cy.task("diagnostic", "state: " + win.bulkFeedback.resultMessage + "; submitting=" + win.bulkFeedback.submitting));
-    cy.wait(1000);
-    cy.get("#bulkResult").invoke("text").then((value) => cy.task("diagnostic", "one second later: " + value));
-    cy.window().then((win) => cy.task("diagnostic", "state after one second: " + win.bulkFeedback.resultMessage + "; submitting=" + win.bulkFeedback.submitting));
     cy.get("#bulkResult").should("contain", "Connection uncertain");
+    cy.request({ url: "/api/threads", headers: { "X-Demo-User": "tutor-1" } })
+      .then((response) => { cy.wrap(response.body.length).as("afterUnknown"); });
     cy.reload();
     cy.get("#bulkNav").click();
     cy.get('[data-learner="learner-1"] [data-field="feedback_text"]')
       .should("contain.value", "must remain recoverable").and("be.disabled");
     cy.get("#bulkSubmit").click();
     cy.get("#bulkResult").should("contain", "1 published");
+    cy.get("@afterUnknown").then((count) => {
+      cy.request({ url: "/api/threads", headers: { "X-Demo-User": "tutor-1" } })
+        .its("body.length").should("equal", count);
+    });
   });
 
   it("requires the tutor to select a judgement and write a review before closure", () => {

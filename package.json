@@ -6,6 +6,6 @@
     "test:e2e:open": "cypress open"
   },
   "devDependencies": {
-    "cypress": "^15.0.0"
+    "cypress": "15.21.2"
   }
 }

@@ -61,6 +61,7 @@ async function refresh() {
     updateNavigation();
     $("entraLogout").hidden = state.mode !== "entra";
     await render();
+    window.notifications?.activate();
   } catch (err) {
     const text = state.mode === "entra"
       ? '<p>Sign in using your College account.</p><a class="button-primary" href="/auth/login">Sign in with Microsoft</a>'
@@ -71,6 +72,7 @@ async function refresh() {
 function updateNavigation() {
   const admin = state.bootstrap?.user.role === "admin";
   $("reportsNav").hidden = !admin;
+  $("notificationsNav").hidden = !state.bootstrap;
   $("oversightNav").hidden = !state.bootstrap?.can_view_oversight;
   $("organisationNav").hidden = !state.bootstrap?.can_manage_organisation;
   $("boardNav").hidden = admin;
@@ -296,6 +298,7 @@ async function render() {
   else if (state.page === "bulk") await window.bulkFeedback.render();
   else if (state.page === "oversight") await window.organisation.renderOversight();
   else if (state.page === "organisation") await window.organisation.renderConfiguration();
+  else if (state.page === "notifications") await window.notifications.render();
   else {
     renderBoard();
     if (state.bootstrap.user.role === "tutor") await renderTutorFocus();
@@ -464,6 +467,7 @@ $("identitySelect").addEventListener("change", async (event) => {
   navButtons.forEach(button => { button.disabled = true; });
   try {
     if (state.page === "bulk") await window.bulkFeedback.flush();
+    window.notifications?.stop();
     state.identity = nextIdentity;
     state.bootstrap = null;
     state.threads = [];

@@ -25,8 +25,9 @@
   async function renderConfiguration() {
     if (!state.bootstrap.can_manage_organisation) return;
     const identity = state.identity;
-    const data = await api("/api/organisation?academic_year=" + encodeURIComponent(year));
-    if (state.page !== "organisation" || state.identity !== identity) return;
+    const requestedYear = year;
+    const data = await api("/api/organisation?academic_year=" + encodeURIComponent(requestedYear));
+    if (state.page !== "organisation" || state.identity !== identity || requestedYear !== year) return;
     const root = $("app");
     root.innerHTML = heading("Organisation", "Configure annual course ownership and staff responsibilities for approved accounts.") +
       '<section class="report-panel"><label>Academic year<input id="orgYear" value="' + esc(year) + '" pattern="20[0-9]{2}/[0-9]{2}" maxlength="7"></label><button id="orgYearLoad" type="button" class="button-ghost">Load year</button></section>' +
@@ -39,20 +40,24 @@
       '<section class="report-panel"><h2>Staff responsibilities</h2><p class="quiet">Only existing approved lecturer accounts can be allocated. Department access is read-only outside a lecturer’s own teaching allocations.</p><label>Lecturer<select id="orgStaff"><option value="">Choose lecturer</option>' + options(data.staff) + '</select></label><div id="orgStaffForm"></div></section>';
     const stillHere = () => state.identity === identity && state.page === "organisation";
     async function submit(path, method, payload, form) {
-      const button = form.querySelector('button[type="submit"]');
-      button.disabled = true;
+      const controls = [...root.querySelectorAll("button, input, select")].filter(control => !control.disabled);
+      controls.forEach(control => { control.disabled = true; });
       try {
         await api(path, { method, body: JSON.stringify(payload) });
-        if (stillHere()) { notify("Configuration saved"); await renderConfiguration(); }
+        if (stillHere()) { await renderConfiguration(); notify("Configuration saved"); }
       } catch (error) {
         if (stillHere()) notify(error.message);
-      } finally { button.disabled = false; }
+      } finally { controls.forEach(control => { control.disabled = false; }); }
     }
     $("orgYearLoad").addEventListener("click", async () => {
       const candidate = $("orgYear").value.trim();
       if (!/^20\d\d\/\d\d$/.test(candidate) || (Number(candidate.slice(0,4)) + 1) % 100 !== Number(candidate.slice(-2))) return notify("Use an academic year such as 2026/27.");
       year = candidate;
-      await renderConfiguration();
+      const controls = [...root.querySelectorAll("button, input, select")].filter(control => !control.disabled);
+      controls.forEach(control => { control.disabled = true; });
+      try { await renderConfiguration(); }
+      catch (error) { if (stillHere()) notify(error.message); }
+      finally { controls.forEach(control => { control.disabled = false; }); }
     });
     root.querySelectorAll("[data-catalogue]").forEach(form => form.addEventListener("submit", event => {
       event.preventDefault();

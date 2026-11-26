@@ -28,8 +28,10 @@
     try {
       const data = await api("/api/notifications");
       if (token !== generation) return;
+      const changed = JSON.stringify(data) !== JSON.stringify(current);
       accept(data, true);
-      if (state.page === "notifications") renderContents(data);
+      const form = $("notificationPreferences");
+      if (state.page === "notifications" && changed && !form?.dataset.dirty && !form?.contains(document.activeElement)) renderContents(data);
     } catch (_) {
       // A failed poll leaves the previous count visible. Inbox requests remain retryable.
     } finally {
@@ -79,6 +81,7 @@
         '</div>' : '<p class="quiet">No notifications yet.</p>') + '</section>';
     const id = state.bootstrap.user.id;
     const sameAccount = () => state.bootstrap?.user.id === id && state.page === "notifications";
+    $("notificationPreferences").addEventListener("change", event => { event.currentTarget.dataset.dirty = "true"; });
     $("notificationPreferences").addEventListener("submit", async event => {
       event.preventDefault();
       const form = event.currentTarget;

@@ -378,7 +378,9 @@ function actionButtons(thread) {
     '" data-status="' + key + '" data-id="' + thread.id + '">' + escapeHtml(label) + '</button>').join("");
 }
 async function openThread(fid) {
+  const identity = state.bootstrap?.user.id;
   const t = await api("/api/threads/" + fid);
+  if (!identity || identity !== state.bootstrap?.user.id) return;
   state.selected = fid;
   state.selectedVersion = t.version;
   state.selectedRequiresAction = t.feedback_required;

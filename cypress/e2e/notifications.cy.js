@@ -6,6 +6,7 @@ describe("Notification inbox", () => {
     }}).its("status").should("eq",201);
     cy.visit("/");
     cy.get("#identitySelect").select("learner-1");
+    cy.get("#identitySelect").should("not.be.disabled");
     cy.get("#notificationsNav").should("be.visible").click();
     cy.get("#app").should("contain", "New teacher feedback is available.");
     cy.get("[data-notification-id]").first().click();

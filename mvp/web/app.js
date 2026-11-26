@@ -71,6 +71,8 @@ async function refresh() {
 function updateNavigation() {
   const admin = state.bootstrap?.user.role === "admin";
   $("reportsNav").hidden = !admin;
+  $("oversightNav").hidden = !state.bootstrap?.can_view_oversight;
+  $("organisationNav").hidden = !state.bootstrap?.can_manage_organisation;
   $("boardNav").hidden = admin;
   $("bulkNav").hidden = admin || state.bootstrap?.user.role !== "tutor";
   document.querySelectorAll("[data-page]").forEach((button) => button.classList.toggle("active", button.dataset.page === state.page));
@@ -292,6 +294,8 @@ async function renderTutorFocus() {
 async function render() {
   if (state.page === "reports") await renderReports();
   else if (state.page === "bulk") await window.bulkFeedback.render();
+  else if (state.page === "oversight") await window.organisation.renderOversight();
+  else if (state.page === "organisation") await window.organisation.renderConfiguration();
   else {
     renderBoard();
     if (state.bootstrap.user.role === "tutor") await renderTutorFocus();
@@ -371,7 +375,9 @@ function actionButtons(thread) {
     '" data-status="' + key + '" data-id="' + thread.id + '">' + escapeHtml(label) + '</button>').join("");
 }
 async function openThread(fid) {
+  const identity = state.bootstrap?.user.id;
   const t = await api("/api/threads/" + fid);
+  if (!identity || identity !== state.bootstrap?.user.id) return;
   state.selected = fid;
   state.selectedVersion = t.version;
   state.selectedRequiresAction = t.feedback_required;
@@ -451,13 +457,27 @@ $("entraLogout").addEventListener("click", async () => {
   } catch (error) { notify(error.message); }
 });
 $("identitySelect").addEventListener("change", async (event) => {
-  if (state.page === "bulk") await window.bulkFeedback.flush();
-  state.identity = event.target.value;
-  state.learnerFilter = "all";
-  state.cohortFilter = "all";
-  $("threadDialog").close();
-  $("newDialog").close();
-  await refresh();
+  const picker = event.currentTarget;
+  const nextIdentity = picker.value;
+  picker.disabled = true;
+  const navButtons = [...document.querySelectorAll("[data-page]")];
+  navButtons.forEach(button => { button.disabled = true; });
+  try {
+    if (state.page === "bulk") await window.bulkFeedback.flush();
+    state.identity = nextIdentity;
+    state.bootstrap = null;
+    state.threads = [];
+    state.targets = [];
+    state.learnerFilter = "all";
+    state.cohortFilter = "all";
+    $("threadDialog").close();
+    $("newDialog").close();
+    $("app").innerHTML = '<p class="loading">Loading your workspace…</p>';
+    await refresh();
+  } finally {
+    picker.disabled = false;
+    navButtons.forEach(button => { button.disabled = false; });
+  }
 });
 document.addEventListener("click", async (event) => {
   const page = event.target.closest("[data-page]");

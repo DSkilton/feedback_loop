@@ -1,0 +1,11 @@
+{
+  "name": "feedback-loop-browser-tests",
+  "private": true,
+  "scripts": {
+    "test:e2e": "cypress run --browser electron",
+    "test:e2e:open": "cypress open"
+  },
+  "devDependencies": {
+    "cypress": "^15.0.0"
+  }
+}

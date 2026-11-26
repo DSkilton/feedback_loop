@@ -24,6 +24,7 @@ describe("Organisation configuration and read-only oversight", () => {
     cy.get('#staffAllocationForm input[name="programme_lead_department_ids"][value="computing"]').should("be.checked");
     cy.get('#staffAllocationForm input[name="iv_course_ids"][value="computing"]').should("be.checked");
     cy.get("#identitySelect").select("tutor-2");
+    cy.get("#identitySelect").should("not.be.disabled");
     cy.get("#oversightNav").should("be.visible").click();
     cy.get("#organisationNav").should("not.be.visible");
     cy.get("#oversightCohort").select("computing-26");
@@ -35,6 +36,7 @@ describe("Organisation configuration and read-only oversight", () => {
     cy.get("[data-status]").should("not.exist");
     cy.get('[data-close="threadDialog"]').click();
     cy.get("#identitySelect").select("learner-1");
+    cy.get("#identitySelect").should("not.be.disabled");
     cy.get("#oversightNav").should("not.be.visible");
     cy.get("#organisationNav").should("not.be.visible");
   });

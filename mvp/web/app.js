@@ -455,13 +455,27 @@ $("entraLogout").addEventListener("click", async () => {
   } catch (error) { notify(error.message); }
 });
 $("identitySelect").addEventListener("change", async (event) => {
-  if (state.page === "bulk") await window.bulkFeedback.flush();
-  state.identity = event.target.value;
-  state.learnerFilter = "all";
-  state.cohortFilter = "all";
-  $("threadDialog").close();
-  $("newDialog").close();
-  await refresh();
+  const picker = event.currentTarget;
+  const nextIdentity = picker.value;
+  picker.disabled = true;
+  const navButtons = [...document.querySelectorAll("[data-page]")];
+  navButtons.forEach(button => { button.disabled = true; });
+  try {
+    if (state.page === "bulk") await window.bulkFeedback.flush();
+    state.identity = nextIdentity;
+    state.bootstrap = null;
+    state.threads = [];
+    state.targets = [];
+    state.learnerFilter = "all";
+    state.cohortFilter = "all";
+    $("threadDialog").close();
+    $("newDialog").close();
+    $("app").innerHTML = '<p class="loading">Loading your workspace…</p>';
+    await refresh();
+  } finally {
+    picker.disabled = false;
+    navButtons.forEach(button => { button.disabled = false; });
+  }
 });
 document.addEventListener("click", async (event) => {
   const page = event.target.closest("[data-page]");

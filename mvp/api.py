@@ -958,6 +958,8 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
     @app.post("/api/threads/{fid}/status")
     def change_status(fid: int, payload: StatusChange, person: User = Depends(actor), db: Session = Depends(database)):
         thread = accessible(db, person, fid)
+        if thread.version != payload.expected_version:
+            raise HTTPException(409, "Feedback has changed. Refresh the record before submitting again.")
         try:
             decision = machine.decide(
                 current=thread.status, target=payload.status, actor_role=person.role,
@@ -965,15 +967,34 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             )
         except TransitionRejected as exc:
             raise HTTPException(exc.code, str(exc)) from exc
+        if decision.tutor_approved and thread.feedback_required:
+            if payload.judgement is None or len(payload.review_note.strip()) < 5:
+                raise HTTPException(422, "Choose a judgement and write a short tutor review before closing.")
+        elif payload.judgement is not None or payload.review_note.strip():
+            raise HTTPException(422, "Review details are only accepted when closing actionable feedback.")
 
-        # Apply the approved transition and publish both audit and report
-        # observations inside the same transaction; any failure rolls back all.
-        thread.status = decision.target
-        thread.updated_at = utcnow()
-        thread.closed_at = utcnow() if decision.tutor_approved else None
+        changed_at = utcnow()
+        affected = db.execute(update(Feedback).where(
+            Feedback.id == fid, Feedback.version == payload.expected_version,
+        ).values(
+            status=decision.target, version=Feedback.version + 1, updated_at=changed_at,
+            closed_at=changed_at if decision.tutor_approved else None,
+        ).execution_options(synchronize_session=False)).rowcount
+        if affected != 1:
+            db.rollback()
+            raise HTTPException(409, "Feedback has changed. Refresh the record before submitting again.")
         if decision.progress_note:
             db.add(Note(feedback_id=fid, author_id=person.id,
                         body="Work submitted for review: " + decision.progress_note))
+        if decision.tutor_approved and thread.feedback_required:
+            db.add(FeedbackReview(
+                feedback_id=fid, tutor_id=person.id,
+                judgement=payload.judgement, decision_note=payload.review_note.strip(),
+            ))
+            db.add(Note(
+                feedback_id=fid, author_id=person.id,
+                body=f"Review — {JUDGEMENT_LABELS[payload.judgement]}: {payload.review_note.strip()}",
+            ))
         publisher.publish(db, FeedbackChanged(
             event_type=FEEDBACK_STATUS_CHANGED, feedback_id=fid, actor_id=person.id,
             previous_status=decision.previous, status=decision.target,
@@ -981,6 +1002,7 @@ def create_app(db_url: str | None = None, demo_mode: bool | None = None, seed: b
             tutor_approved=decision.tutor_approved,
         ))
         db.commit()
+        db.refresh(thread)
         return summarise(db, thread)
 
     @app.post("/api/threads/{fid}/comments", status_code=201)

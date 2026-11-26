@@ -128,8 +128,22 @@ def test_information_only_close_does_not_invent_assessment_judgement(workspace):
 def test_bulk_rejects_unauthorised_roles_and_invalid_work_links(workspace):
     client, path = workspace
     invalid = item("learner-1", "00000000-0000-4000-8000-000000000007", work_url="javascript:alert(1)")
-    assert client.post("/api/threads/bulk", json={"items": [invalid]}).status_code == 422
+    rejected = client.post("/api/threads/bulk", json={"items": [invalid]})
+    assert rejected.status_code == 200
+    assert rejected.json()["results"][0]["code"] == 422
     client.headers["X-Demo-User"] = "learner-1"
     assert client.post("/api/threads/bulk", json={"items": [item("learner-1", "00000000-0000-4000-8000-000000000008")]}).status_code == 403
     with sqlite3.connect(path) as connection:
         assert connection.execute("select count(*) from mvp_feedback_submissions").fetchone()[0] == 0
+
+
+def test_schema_invalid_row_does_not_prevent_later_valid_saves(workspace):
+    client, _ = workspace
+    bad = item("learner-1", "00000000-0000-4000-8000-000000000009", work_url="http://untrusted.example")
+    good = item("learner-2", "00000000-0000-4000-8000-000000000010")
+    response = client.post("/api/threads/bulk", json={"items": [bad, good]})
+    assert response.status_code == 200
+    result = response.json()
+    assert result["saved"] == 1 and result["failed"] == 1
+    assert [r["code"] for r in result["results"] if not r["ok"]] == [422]
+    assert result["results"][1]["ok"] is True
